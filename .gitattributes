@@ -1,0 +1,3 @@
+# 统一文本文件换行符为 LF，二进制文件不做转换
+* text=auto eol=lf
+*.png binary

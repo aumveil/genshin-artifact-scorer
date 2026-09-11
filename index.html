@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#131019">
+  <meta name="description" content="原神圣遗物配置与评分工具：保存/计算各角色圣遗物，评估新圣遗物的替换与强化价值。">
+  <title>圣遗物评分</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23131019'/%3E%3Cpath d='M16 6l2.4 6.1L25 13.2l-5 4.1 1.5 6.7L16 20.4l-5.5 3.6L12 17.3l-5-4.1 6.6-1.1z' fill='%23d9b64a'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="logo" id="logoBtn" title="回到角色列表" role="button" tabindex="0" aria-label="回到角色列表">
+        <span class="logo-mark" aria-hidden="true">✦</span>
+        <span>圣遗物评分</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn" id="btnEvaluate" title="对全部角色评估新圣遗物价值">⚖ 价值评估</button>
+        <button class="btn btn-primary" id="btnNewRole">＋ 新建角色</button>
+        <button class="btn" id="btnImport" title="导入备份或外部数据">⇪ 导入</button>
+        <button class="btn" id="btnExport" title="导出完整数据备份">⇩ 导出</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="app" class="app"></main>
+
+  <div id="modalRoot" class="modal-root hidden" aria-hidden="true"></div>
+  <input type="file" id="importFile" accept=".json,application/json" class="hidden">
+
+  <!-- 模块加载顺序：常量 → 校验 → 识别 → 适配器 → 存储 → IO → 算法 → 反馈 → 状态 → 视图 → 入口 -->
+  <script src="js/constants.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/parser.js"></script>
+  <script src="js/adapters.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/io.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/feedback.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
