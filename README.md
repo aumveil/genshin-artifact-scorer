@@ -1,5 +1,14 @@
 # 圣遗物评分工具
 
+<div align="center">
+
+![License](https://img.shields.io/badge/license-MIT-yellow)
+![Tests](https://img.shields.io/badge/tests-142%20passing-brightgreen)
+![JavaScript](https://img.shields.io/badge/vanilla-JS-f7df1e?logo=javascript&logoColor=black)
+![Build](https://img.shields.io/badge/build-none-lightgrey)
+
+</div>
+
 原神圣遗物配置管理网页：保存并管理各角色的圣遗物配置，量化评估圣遗物词条价值，为「强化还是替换」提供决策参考。
 
 纯前端实现（原生 HTML/CSS/JS，无框架、无构建步骤），数据保存在浏览器 localStorage，支持导出 / 导入 / 合并 JSON 备份。
@@ -20,6 +29,14 @@
 - **3/4 词条初始圣遗物**：通过「待激活」状态支持未激活词条的录入
 - **数据管理**：localStorage 持久化，带版本化 migrate 数据迁移，防丢字段；JSON 导出 / 导入 / 合并（并集）
 - **首页筛选**：按散件部位 / 主属性 / 套装多选过滤，筛选状态可持久化、刷新自动恢复
+
+## 界面预览
+
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="首页角色列表：按评分排序，展示有效词条、各部位评分与充能状态" width="49%">
+  <img src="docs/screenshots/detail.png" alt="角色详情：总分达成度与五件圣遗物逐件词条当量" width="49%"><br>
+  <sub>左：首页角色列表（评分排序 / 有效词条 / 充能达标状态）　　右：角色详情（总分达成度 / 逐件圣遗物滚数当量与达成百分比）</sub>
+</p>
 
 ## 快速开始
 
