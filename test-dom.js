@@ -47,14 +47,15 @@ const path = require("path");
   role.weights = { "暴击率": 1, "暴击伤害": 1, "攻击力百分比": 0.8 };
   role.looseSlot = "goblet";
   ["flower", "plume", "sands", "goblet", "circlet"].forEach(slot => {
+    // circlet 暴击率 3.3 无法档位分解 → 推断 null（无判据）→ 出切换按钮；其余 4 件 Σk=9 刚性 4 初始（静态标签）
     role.artifacts[slot] = {
       id: App.store.genId(), slot, set: "炽烈的炎之魔女",
       mainStat: slot === "flower" ? "生命值" : slot === "plume" ? "攻击力" : slot === "sands" ? "攻击力百分比" : slot === "goblet" ? "火元素伤害加成" : "暴击伤害",
       level: 20,
       substats: [
-        { stat: "暴击率", value: 7.4, activated: true },
+        { stat: "暴击率", value: slot === "circlet" ? 3.3 : 7.4, activated: true },
         { stat: "暴击伤害", value: 15.6, activated: true },
-        { stat: "攻击力百分比", value: 11.6, activated: true },
+        { stat: "攻击力百分比", value: 12.9, activated: true },   // 档位分解 Σk=2+2+3+2=9 → 刚性 4 初始（原 11.6 为 Σk=8 会推断成 3）
         { stat: "元素充能效率", value: 13.0, activated: true }
       ]
     };
@@ -223,6 +224,112 @@ const path = require("path");
     console.log("loadFilter 恢复:", restored && restored.slot === "goblet" ? "✓" : "✗");
     clearBtn().click();   // 清理
     await new Promise(r => setTimeout(r, 30));
+  }
+
+  // —— 重塑分析视图冒烟（算法四三情况归属：顶栏入口 → 视图渲染 → 归属 → 档位切换）——
+  {
+    const btnRemodel = window.document.getElementById("btnRemodel");
+    btnRemodel.click();
+    await new Promise(r => setTimeout(r, 30));
+    const title = app.querySelector(".detail-title");
+    const cards = app.querySelectorAll(".remodel-card");
+    const badges = Array.from(app.querySelectorAll(".remodel-card .c-head .badge")).map(b => b.textContent);
+    console.log("重塑视图标题:", title ? title.textContent : "（无）", title && title.textContent === "圣遗物重塑分析" ? "✓" : "✗");
+    // 默认仅显示 RV>0：场景1头(circlet 暴击率3.3 → baseline 低 → RV+0.84) + 场景1花/场景2花（同一转移行动对，各 RV+0.11）；
+    // 场景1 羽/沙（原地 RV<0）不显示，场景1 杯（散件无宿主）与场景3 花（无有效词条、无同套宿主）无行动被排除
+    console.log("重塑卡片数(默认 RV>0):", cards.length, cards.length === 3 ? "✓" : "✗");
+    console.log("RV 徽章示例:", badges.slice(0, 2).join(" | "));
+    if (!title || title.textContent !== "圣遗物重塑分析" || cards.length !== 3) process.exitCode = 1;
+    // 三情况标签：场景1花的散件位是杯（花本身是套装件）→ 转移行动 kind = transfer，标签「同套转移」
+    const caseTags = Array.from(app.querySelectorAll(".remodel-card .rm-case")).map(i => i.textContent);
+    console.log("评估对象标签:", caseTags.slice(0, 4).join(" | "));
+    // 展开行 kind 标签：「全部可评估对象」行用三情况标签（与评估对象行同口径，取代旧的 自己·/宿主·）
+    const allKindTags = Array.from(app.querySelectorAll(".remodel-card .rm-all-row .rm-case")).map(i => i.textContent);
+    const kindOk = allKindTags.length >= 2 && allKindTags.every(t => /原地强化|同套转移|晋升套装件/.test(t));
+    console.log("展开行kind标签:", allKindTags.length, kindOk ? "✓" : "✗", "|", allKindTags.join("|"));
+    if (!kindOk) process.exitCode = 1;
+    // 勾选显示无价值件 → 5 卡（+ 场景1 羽/沙/头原地强化 RV<0）
+    const showAll = app.querySelector(".rm-showall input");
+    showAll.click();
+    await new Promise(r => setTimeout(r, 30));
+    const cardsAll = app.querySelectorAll(".remodel-card");
+    console.log("显示无价值件后:", cardsAll.length, cardsAll.length === 5 ? "✓" : "✗");
+    if (cardsAll.length !== 5) process.exitCode = 1;
+    app.querySelector(".rm-showall input").click();   // 还原（render 已重建 DOM，必须重新查询；游离节点 click 不触发 change）
+    await new Promise(r => setTimeout(r, 30));
+    const cardsBack = app.querySelectorAll(".remodel-card");
+    console.log("还原显示无价值件后(应3):", cardsBack.length, cardsBack.length === 3 ? "✓" : "✗");
+    if (cardsBack.length !== 3) process.exitCode = 1;
+    // 三情况开关：渲染 3 个开关；关闭「原地强化」→ 场景2花/羽/沙/头（唯一行动为原地）落榜，仅剩场景1花（同套转移）
+    const kindInput = idx => app.querySelectorAll(".filter-bar .rm-kind input")[idx];
+    console.log("三情况开关数量:", kindInput ? app.querySelectorAll(".filter-bar .rm-kind").length : 0,
+      app.querySelectorAll(".filter-bar .rm-kind").length === 3 ? "✓" : "✗");
+    if (app.querySelectorAll(".filter-bar .rm-kind").length !== 3) process.exitCode = 1;
+    kindInput(0).click();   // 关闭原地强化
+    await new Promise(r => setTimeout(r, 30));
+    const cardsNoSelf = app.querySelectorAll(".remodel-card");
+    // 评估对象行的标签（详情展开行带三情况标签「·」前缀，过滤掉）
+    const tagsNoSelf = Array.from(app.querySelectorAll(".remodel-card .rm-case"))
+      .map(i => i.textContent).filter(t => !/·/.test(t));
+    const noSelfOk = cardsNoSelf.length >= 1 && !tagsNoSelf.some(t => /原地强化/.test(t))
+      && tagsNoSelf.every(t => /同套转移|晋升套装件/.test(t));
+    console.log("关闭原地强化后:", cardsNoSelf.length, noSelfOk ? "✓（无原地强化标签）" : "✗",
+      "| 标签:", tagsNoSelf.join("|"));
+    if (!noSelfOk) process.exitCode = 1;
+    // 三种情况全部关闭 → 无行动可评估，列表为空且汇总行提示
+    kindInput(1).click(); kindInput(2).click();
+    await new Promise(r => setTimeout(r, 30));
+    const sumAllOff = app.querySelector(".eval-summary");
+    const cardsAllOff = app.querySelectorAll(".remodel-card");
+    const allOffOk = cardsAllOff.length === 0 && sumAllOff && /均已关闭/.test(sumAllOff.textContent);
+    console.log("全部关闭后:", cardsAllOff.length, allOffOk ? "✓（汇总行提示已出现）" : "✗");
+    if (!allOffOk) process.exitCode = 1;
+    // 还原三种情况 → 回到默认 3 卡
+    kindInput(0).click(); kindInput(1).click(); kindInput(2).click();
+    await new Promise(r => setTimeout(r, 30));
+    const cardsRestore = app.querySelectorAll(".remodel-card");
+    console.log("还原三开关后:", cardsRestore.length, cardsRestore.length === 3 ? "✓" : "✗");
+    if (cardsRestore.length !== 3) process.exitCode = 1;
+    // 录入弹窗：等级默认 20（重塑评估域；切换到手动输入 tab 后可见 #mLevel）
+    const btnNewArt = Array.from(app.querySelectorAll(".filter-bar button")).find(b => b.textContent.includes("录入新圣遗物"));
+    btnNewArt.click();
+    await new Promise(r => setTimeout(r, 30));
+    const tabManual = window.document.querySelector(".mode-tabs .tab[data-m='manual']");
+    if (tabManual) tabManual.click();
+    await new Promise(r => setTimeout(r, 20));
+    const mLevel = window.document.getElementById("mLevel");
+    const lvOk = !!mLevel && mLevel.value === "20";
+    console.log("录入弹窗默认等级(应20):", mLevel ? mLevel.value : "（mLevel 不存在）", lvOk ? "✓" : "✗");
+    if (!lvOk) process.exitCode = 1;
+    window.App.feedback.closeModal();
+    await new Promise(r => setTimeout(r, 20));
+    // 档位切换到谕告（重渲染不报错；谕告档下 5 件可评估件 RV 全部 > 0）
+    const kSel = app.querySelector(".filter-bar select");
+    kSel.value = "4";
+    kSel.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await new Promise(r => setTimeout(r, 30));
+    const cardsK4 = app.querySelectorAll(".remodel-card");
+    console.log("谕告档重渲染:", cardsK4.length === 5 ? "✓" : "✗", `(${cardsK4.length} 卡)`);
+    if (cardsK4.length !== 5) process.exitCode = 1;
+    // 3/4 初始自动推断（二态）：场景1 花/羽/沙（Σk=9）→ 静态标签「初始4」（无按钮）；
+    // 场景1 头（暴击率3.3 无判据）+ 场景2 花（单词条）→ 切换按钮「初始4」（null 回退默认 4）
+    const initTags = Array.from(app.querySelectorAll(".remodel-card .rm-init-static")).map(b => b.textContent);
+    const initBtns0 = Array.from(app.querySelectorAll(".remodel-card .rm-init"));
+    const staticOk = initTags.length === 3 && initTags.every(t => /初始4/.test(t));
+    const btnOk = initBtns0.length === 2 && initBtns0.every(b => /初始4/.test(b.textContent));
+    console.log("3/4 初始推断二态:", staticOk && btnOk ? "✓" : "✗",
+      `(静态标签 ${initTags.length} 张全初始4: ${staticOk ? "✓" : "✗"}; 切换按钮 ${initBtns0.length} 个全初始4: ${btnOk ? "✓" : "✗"})`);
+    if (!(staticOk && btnOk)) process.exitCode = 1;
+    // 3/4 初始切换（仅两可/无判据件有按钮；会话内 override，重渲染不报错）
+    const btnInit = app.querySelector(".remodel-card .rm-init");
+    btnInit.click();
+    await new Promise(r => setTimeout(r, 30));
+    const initTexts = Array.from(app.querySelectorAll(".remodel-card .rm-init, .remodel-card .rm-init-static")).map(b => b.textContent);
+    const toggled = initTexts.filter(t => /初始3/.test(t)).length;   // 切换后按钮文案「初始3」（静态标签不受影响，仍全为初始4）
+    console.log("3/4 初始切换:", toggled === 1 ? "✓" : "✗", `(${toggled} 张切为 3 初始，共 ${initTexts.length} 卡)`);
+    if (toggled !== 1) process.exitCode = 1;
+    // 返回列表
+    window.App.ui.render();
   }
 
   console.log("捕获错误:", window.__testErrors.length ? window.__testErrors : "无");

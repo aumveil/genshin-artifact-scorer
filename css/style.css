@@ -859,6 +859,88 @@ body {
   color: var(--brand-strong); border-bottom-color: var(--brand);
 }
 
+/* ============================== 15.5 重塑分析 ============================== */
+.remodel-card .rm-src {
+  font-style: normal; font-weight: 400; font-size: var(--fs-sm);
+  color: var(--text-3); margin-left: 6px;
+}
+.remodel-card .rm-head-right { display: flex; align-items: center; gap: 8px; }
+.remodel-card .rm-init { font-size: var(--fs-sm); }
+/* 推断唯一的初始数：静态标签（同按钮尺寸观感，无按钮感，不可点） */
+.remodel-card .rm-init-static {
+  font-size: var(--fs-sm); white-space: nowrap; user-select: none;
+  padding: 3px 10px; border-radius: var(--r-sm);
+  background: var(--bg-2); color: var(--text-2);
+}
+.remodel-card.remodel-none { opacity: 0.72; }
+.remodel-card .rm-del {
+  margin-top: 8px; background: none; color: var(--text-3);
+  border-color: transparent; opacity: 0.7;
+}
+.remodel-card .rm-del:hover { color: #ff8b84; border-color: rgba(229, 85, 77, 0.4); opacity: 1; }
+/* 主行：行动 → 评估对象 ＋ 现状 → 期望（视觉重心，浅底突出） */
+.rm-main {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  margin-top: 10px; padding: 8px 10px;
+  background: var(--bg-2); border-radius: var(--r-sm);
+}
+.rm-main .rm-case { font-size: var(--fs-md); }
+.rm-main .rm-role { cursor: pointer; color: var(--text-1); font-size: var(--fs-lg); }
+.rm-main .rm-role:hover { color: var(--brand-strong); text-decoration: underline; }
+.rm-main .rm-flow { color: var(--text-2); }
+.rm-main .rm-flow b { color: var(--brand-strong); font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
+.rm-main .rm-arrow { font-style: normal; color: var(--text-3); padding: 0 2px; }
+/* 操作行：建议指定 + 尘耗/效率 */
+.rm-op {
+  display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px;
+  font-size: var(--fs-sm); color: var(--text-2);
+}
+.rm-op .rm-sug { color: var(--brand-strong); }
+.rm-op .rm-dim { color: var(--text-3); }
+/* 三情况标签（原地强化/同套转移/晋升套装件） */
+.remodel-card .rm-case {
+  font-style: normal; font-weight: 600; font-size: var(--fs-sm);
+  color: var(--brand-strong); margin-right: 4px;
+}
+/* 跨角色转移的偏差提示（情况二高估/情况三低估，仅提示不进公式） */
+.remodel-card .rm-note {
+  font-size: var(--fs-sm); color: var(--text-3);
+  margin-top: 6px; padding-left: 2px;
+}
+/* 折叠详情：保底线 / 组合上限 / 期望达成度 + 全部可评估对象 */
+.rm-detail { margin-top: 10px; border-top: 1px dashed var(--line-1); padding-top: 8px; }
+.rm-detail summary { cursor: pointer; font-size: var(--fs-sm); color: var(--text-3); user-select: none; }
+.rm-detail summary:hover { color: var(--text-1); }
+.rm-detail[open] summary { margin-bottom: 6px; }
+.rm-meta {
+  display: flex; gap: 16px; flex-wrap: wrap; padding: 2px 6px 6px;
+  font-size: var(--fs-sm); color: var(--text-3);
+}
+.rm-meta b { color: var(--text-1); font-variant-numeric: tabular-nums; }
+.rm-showall {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--fs-md); color: var(--text-2); cursor: pointer; user-select: none;
+}
+/* 三情况开关（原地强化/同套转移/晋升套装件）：与「显示无价值件」同族，但用主题色点明类别 */
+.rm-kind {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: var(--fs-md); color: var(--text-2); cursor: pointer; user-select: none;
+  padding: 3px 10px; border: 1px solid var(--line-1); border-radius: var(--r-pill);
+  transition: var(--t-fast);
+}
+.rm-kind:hover { color: var(--text-1); border-color: var(--line-2); }
+.rm-kind input { accent-color: var(--brand); margin: 0; }
+.rm-kind:has(input:checked) { color: var(--brand); border-color: var(--brand); background: rgba(217, 182, 74, .10); }
+.rm-all-row {
+  display: flex; gap: 14px; align-items: center; padding: 4px 6px;
+  font-size: var(--fs-md); font-variant-numeric: tabular-nums;
+}
+.rm-all-row .ra-name { min-width: 90px; cursor: pointer; font-weight: 600; }
+.rm-all-row .ra-name:hover { color: var(--brand-strong); }
+.rm-all-row .ra-rv { font-weight: 700; min-width: 56px; }
+.rm-all-row .ra-flow { color: var(--text-3); }
+.rm-all-row.rm-more { color: var(--text-3); font-size: var(--fs-sm); }
+
 /* ============================== 16. 响应式 ============================== */
 @media (max-width: 900px) {
   .role-card .rc-eff { width: auto; min-width: 0; }

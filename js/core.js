@@ -222,9 +222,223 @@
     return { valuable, summary, results };
   }
 
+  // ============ 算法四：圣遗物重塑价值评估（定稿算法文档第五章）============
+  /** 组合数 C(n, x) */
+  function comb(n, x) {
+    let r = 1;
+    for (let i = 1; i <= x; i++) r = r * (n - i + 1) / i;
+    return r;
+  }
+
+  /**
+   * 安全网期望命中次数 E[Y_k]：X ~ B(n, 1/2)，Y = max(X, k)
+   * 游戏的「动态检测」实现（歪满保底缺口后剩余强化强制命中指定词条）与其数学等价。
+   * E[Y_k] = n/2 + Σ_{x=0}^{k-1} C(n,x)/2ⁿ · (k−x)
+   */
+  function expectedHits(n, k) {
+    let e = n / 2;
+    for (let x = 0; x < k; x++) e += (comb(n, x) / Math.pow(2, n)) * (k - x);
+    return e;
+  }
+
+  /**
+   * 单件重塑价值计算（算法文档 5.3/5.4）。
+   * E[remodel] = ROLL_AVG × [Σw_init + E[Y_k]·(w1+w2)/2 + (n−E[Y_k])·(w3+w4)/2]
+   * RV = E[remodel] − currentScore（期望净提升，主排序指标）
+   * @param artifact    满 5★ 圣遗物
+   * @param role        角色配置（决定词条权值）
+   * @param k           保底档位：2 基础 / 3 高阶 / 4 谕告（默认基础档——保守、不依赖账号圣言解明进度）
+   * @param initialCount 初始词条数 4（默认，n=5）或 3（n=4，第 1 次强化生成第 4 词条且重塑中不变）
+   * @returns null（未满级 / 无有效词条）或 {w1,w2,w34,sumW,n,k,eY,eRemodel,currentScore,rv,achieve,floors,ceiling,dust,efficiency,suggest}
+   */
+  function calcRemodel(artifact, role, k = C.REMODEL_K.basic, initialCount = 4) {
+    if (!artifact || !role) return null;
+    if (artifact.level < C.MAX_LEVEL) return null;          // 仅满级件可重塑
+    const w = role.weights || {};
+    const eff = role.effectiveStats || [];
+    const entries = (artifact.substats || [])
+      .filter(s => s.activated !== false)                    // 防御式：待激活词条不计（满级件不应存在）
+      .map(s => ({ stat: s.stat, w: eff.includes(s.stat) ? (w[s.stat] || 0) : 0 }))
+      .sort((a, b) => b.w - a.w);
+    const w1 = entries[0] ? entries[0].w : 0;
+    const w2 = entries[1] ? entries[1].w : 0;
+    const w34 = (entries[2] ? entries[2].w : 0) + (entries[3] ? entries[3].w : 0);
+    if (w1 <= 0) return null;                                // 无有效词条，重塑无意义
+    const sumW = w1 + w2 + w34;                              // Σw_init（全部副词条有效权值和）
+    const n = initialCount === 3 ? 4 : 5;
+    const eY = expectedHits(n, k);
+    const eRemodel = C.ROLL_AVG * (sumW + eY * (w1 + w2) / 2 + (n - eY) * w34 / 2);
+    const current = calcArtifactScore(artifact, role);
+    const perfect = calcPerfect(artifact.slot, role);
+    const rv = eRemodel - current;
+    const dust = C.DUST_COST[artifact.slot] || 1;
+    return {
+      w1, w2, w34, sumW, n, k, eY,
+      eRemodel, currentScore: current,
+      rv,                                                    // 主排序指标：期望净提升
+      achieve: perfect > 0 ? eRemodel / perfect : 0,         // 期望达成度（算法二 perfect 为分母）
+      floors: {                                              // 三档确定性下限（最坏分配）
+        basic: C.ROLL_AVG * (sumW + (w1 + w2)),              //   保底 2 次最坏 1+1
+        advanced: C.ROLL_AVG * (sumW + (w1 + 2 * w2)),       //   保底 3 次最坏 1+2
+        oracle: C.ROLL_AVG * (sumW + 2 * (w1 + w2))          //   保底 4 次最坏 2+2
+      },
+      ceiling: sumW + n * w1,                                // 组合天花板（满挡口径，托底不抬天花板）
+      dust,
+      efficiency: rv / dust,                                 // 单位材料效率（展示维度）
+      suggest: entries.filter(e => e.w > 0).slice(0, 2).map(e => e.stat)  // 建议指定的 2 条词条（权值 top2 严格最优）
+    };
+  }
+
+  /** 圣遗物签名（跨角色去重：同一件物理圣遗物在多个角色身上重复录入时只分析一次） */
+  function remodelSignature(art) {
+    if (!art) return "";
+    return [art.set, art.slot, art.mainStat, art.level,
+      (art.substats || []).map(s => `${s.stat}:${s.value}:${s.activated !== false ? 1 : 0}`).join("|")
+    ].join("#");
+  }
+
+  /**
+   * 3/4 初始自动推断（2026-09-28）：按「单发档位分解」判定总 roll 数。
+   * 账本：4 初始 = 4 条×1 发初始 + 5 次强化 = 9 发；3 初始 = 3 发初始 + 首次强化生成第 4 条(1 发) + 4 次强化 = 8 发。
+   * 每条副词条显示值必为 k 发单发档位值（ROLL_TIERS 四档）之和，k ∈ 1..5（4 初始单条最多 1+4 发）。
+   * 对 4 条词条求可行 k 集合后枚举总和：仅可 Σ=9 → 4 初始；仅可 Σ=8 → 3 初始；
+   * 两者皆可（档位两可）或皆不可（异常值/未知词条）→ null（调用方回退默认 4 初始）。
+   * 显示值 ×10 整数化比较避免浮点误差；每词条枚举 ≤ C(k+3,3) ≤ 56 种组合，总量级毫秒级。
+   */
+  function inferInitialCount(artifact) {
+    if (!artifact || artifact.level < C.MAX_LEVEL) return null;
+    const subs = (artifact.substats || []).filter(s => s.activated !== false);
+    if (subs.length !== 4) return null;                    // 满级恒 4 条；不足则无判据
+    const R = subs.map(s => {
+      const tiers = C.ROLL_TIERS[s.stat];
+      if (!tiers) return null;                             // 未知词条（理论上不会出现）
+      const target = Math.round(s.value * 10);
+      const [t0, t1, t2, t3] = tiers.map(v => Math.round(v * 10));
+      const ks = [];
+      for (let k = 1; k <= 5; k++) {
+        let ok = false;
+        for (let a = 0; a <= k && !ok; a++)
+          for (let b = 0; a + b <= k && !ok; b++)
+            for (let c = 0; a + b + c <= k && !ok; c++) {
+              const d = k - a - b - c;
+              if (t0 * a + t1 * b + t2 * c + t3 * d === target) ok = true;
+            }
+        if (ok) ks.push(k);
+      }
+      return ks.length ? ks : null;                        // 该词条值无法由档位分解（超限录入等）
+    });
+    if (R.some(r => r === null)) return null;
+    const feasible = total => {
+      for (const k1 of R[0]) for (const k2 of R[1]) for (const k3 of R[2]) for (const k4 of R[3])
+        if (k1 + k2 + k3 + k4 === total) return true;
+      return false;
+    };
+    const can4 = feasible(9), can3 = feasible(8);
+    if (can4 && !can3) return 4;
+    if (can3 && !can4) return 3;
+    return null;                                           // 两可或皆否 → 无法唯一判定
+  }
+
+  /** 扫描全部角色已穿戴圣遗物 → 满级 5★ 候选（按签名去重，保留首个持有者引用） */
+  function collectRemodelCandidates(roles) {
+    const seen = new Map();
+    (roles || []).forEach(role => {
+      C.SLOT_KEYS.forEach(slot => {
+        const art = role.artifacts && role.artifacts[slot];
+        if (!art || art.level < C.MAX_LEVEL) return;
+        const sig = remodelSignature(art);
+        if (!seen.has(sig)) seen.set(sig, { artifact: art, sourceRole: role, signature: sig });
+      });
+    });
+    return Array.from(seen.values());
+  }
+
+  /**
+   * 「角色装备某套装」判定（5.5 情况二/三宿主条件之一）：
+   * 非散件部位中存在 set == setName 的已穿戴件（散件位不算装备套装）。
+   */
+  function wearsSet(role, setName) {
+    if (!role) return false;
+    return C.SLOT_KEYS.some(slot => {
+      if (role.looseSlot && slot === role.looseSlot) return false;
+      const a = role.artifacts && role.artifacts[slot];
+      return !!(a && a.set === setName);
+    });
+  }
+
+  /**
+   * 三情况归属判定（算法文档 5.5）→ 可评估对象集合 [{role, case, kind}]。
+   * kind = 行动的三情况类别：self（原地强化）| transfer（同套转移）| promote（晋升套装件）。
+   * - 情况一：X 是持有者的套装件（slot ≠ looseSlot）→ 评自己（原地强化，baseline = X 对自己当前分）
+   * - 情况二：套装件 + 宿主 → 评每个宿主（顶替转移，baseline = 宿主现有件分）
+   * - 情况三：散件（slot == looseSlot）→ 不评自身（散件随时可被新散件替换，不值得耗重塑道具），
+   *           仅评满足宿主条件的角色（X 对其是天然套装件，转移后凑更高件数套装；A 补散件即可）
+   * - 新录入件（sourceRole = null）：游离件，按情况三口径评全部宿主
+   * 宿主条件：Y ≠ 持有者 且 Y 装备 X 所属套装（wearsSet）且 Y 在同部位装备同主属性圣遗物
+   * （该件对 Y 的套装归属不限——重塑不改主词条，X 只能与同主词条功能位形成替换比较）。
+   * host 行动的 kind 由 X 对持有者的身份决定：X 是套装件 → transfer；X 是散件/游离件 → promote。
+   */
+  function remodelTargets(artifact, sourceRole, roles) {
+    if (!artifact) return [];
+    const hostKind = sourceRole && artifact.slot !== sourceRole.looseSlot ? "transfer" : "promote";
+    const hosts = (roles || []).filter(r =>
+      r !== sourceRole &&
+      wearsSet(r, artifact.set) &&
+      r.artifacts && r.artifacts[artifact.slot] &&
+      r.artifacts[artifact.slot].mainStat === artifact.mainStat
+    ).map(r => ({ role: r, case: "host", kind: hostKind }));
+    if (sourceRole && artifact.slot !== sourceRole.looseSlot) {
+      hosts.unshift({ role: sourceRole, case: "self", kind: "self" });   // 情况一（套装件恒可评自己）
+    }
+    return hosts;
+  }
+
+  /**
+   * 重塑分析主入口（算法文档 5.5/5.6）：逐候选 × 逐可评估对象计算，
+   * 统一 RV 骨架 = E[remodel] − 功能位现状分（情况一减自己、二/三减宿主现有件），
+   * 每件取 RV 最优行动（互斥：重塑后的件只能装备在一处），按 RV 降序。
+   * @param candidates     collectRemodelCandidates 的产物（或同结构数组，新录入件 sourceRole = null）
+   * @param roles          全部角色配置
+   * @param k              保底档位（默认基础档）
+   * @param initialCountOf (candidate) => 3|4，3/4 初始判定；UI 传入「手动切换 > inferInitialCount 档位推断 > 默认 4」链，缺省全部按 4 初始
+   * @param allowedKinds   可选，开启的情况类别数组（["self","transfer","promote"] 子集）；
+   *                       缺省 = 全部开启。行动按 kind 过滤后，每件在剩余范围内重新取最优。
+   */
+  function analyzeRemodel(candidates, roles, k = C.REMODEL_K.basic, initialCountOf, allowedKinds) {
+    const initOf = typeof initialCountOf === "function" ? initialCountOf : () => 4;
+    const allowed = allowedKinds == null ? null : new Set(allowedKinds);
+    const rows = [];
+    (candidates || []).forEach(c => {
+      const ic = initOf(c);
+      const per = [];
+      remodelTargets(c.artifact, c.sourceRole, roles).forEach(t => {
+        if (allowed && !allowed.has(t.kind)) return;         // 情况开关：不在开启范围内的行动不参与
+        const r = calcRemodel(c.artifact, t.role, k, ic);
+        if (!r) return;                                      // 该对象下无有效词条等 → 跳过
+        const baseline = t.case === "self"                   // 功能位现状分（统一 RV 骨架）
+          ? r.currentScore
+          : calcArtifactScore(t.role.artifacts[c.artifact.slot], t.role);
+        const rv = r.eRemodel - baseline;
+        per.push({
+          role: t.role, case: t.case, kind: t.kind, baseline,
+          r: Object.assign({}, r, { currentScore: baseline, rv, efficiency: rv / r.dust })
+        });
+      });
+      if (!per.length) return;                               // 无可评估对象（散件无宿主等）→ 不进列表
+      per.sort((a, b) => b.r.rv - a.r.rv);
+      rows.push({
+        artifact: c.artifact, sourceRole: c.sourceRole || null, signature: c.signature,
+        initialCount: ic, best: per[0], all: per
+      });
+    });
+    rows.sort((a, b) => b.best.r.rv - a.best.r.rv);
+    return rows;
+  }
+
   global.App = global.App || {};
   global.App.core = {
     calcArtifactScore, calcPerfect, calcEnergyPenalty, calcCharacterScore,
-    maxW, remaining, ERContrib, evaluateAgainst, evaluateArtifact
+    maxW, remaining, ERContrib, evaluateAgainst, evaluateArtifact,
+    expectedHits, calcRemodel, remodelSignature, inferInitialCount, collectRemodelCandidates, wearsSet, remodelTargets, analyzeRemodel
   };
 })(window);

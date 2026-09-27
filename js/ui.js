@@ -1,6 +1,6 @@
 /**
  * ui.js - 视图层（对应《圣遗物网页实现方案.md》三、网页设计）
- * 四个视图：角色列表 / 角色详情 / 双模式录入弹窗 / 价值评估；导入导出。
+ * 五个视图：角色列表 / 角色详情 / 双模式录入弹窗 / 价值评估 / 重塑分析；导入导出。
  * 全局命名空间：App.ui
  */
 (function (global) {
@@ -11,13 +11,25 @@
   const data = global.App.data;
   const feedback = global.App.feedback;   // 反馈层：toast / confirm / prompt / info
 
-  let view = { type: "list" };            // {type:'list'} | {type:'detail', roleId}
+  let view = { type: "list" };            // {type:'list'} | {type:'detail', roleId} | {type:'evaluate'} | {type:'remodel'}
   // 首页筛选状态：独立于 view（切视图不丢失），并持久化到 localStorage（刷新/重开恢复上次筛选）
   let listFilter = (typeof global.App.storage.loadFilter === "function" && global.App.storage.loadFilter())
     || { slot: "", mainStat: "", sets: [] };
   const persistFilter = () => { try { global.App.storage.saveFilter(listFilter); } catch (e) { /* 静默 */ } };
   let pendingArtifact = null;             // 新圣遗物临时对象（评估用）
   let evalHidden = new Set();             // 评估会话内被手动移除的有提升角色 id（重新录入/放弃时清空）
+
+  // —— 重塑分析（算法四）会话内状态（零数据模型改动，均不落盘）——
+  let remodelK = C.REMODEL_K.basic;       // 当前保底档位（主排序默认基础档 k=2）
+  let remodelTempList = [];               // 会话内录入的新圣遗物（临时对象，放弃/替换入口见卡片）
+  const remodelInitOverride = new Map();  // signature → 3|4（3/4 初始会话内切换；默认 4 初始）
+  let remodelShowAll = false;             // 是否显示无价值件（默认仅显示 RV>0）
+  let remodelKinds = { self: true, transfer: true, promote: true };  // 三情况开关（开启的行动类型，任意组合）
+  const REMODEL_KINDS = [                 // 三情况定义（开关顺序即控制栏顺序）
+    { key: "self", label: "原地强化" },
+    { key: "transfer", label: "同套转移" },
+    { key: "promote", label: "晋升套装件" }
+  ];
 
   const $ = sel => document.querySelector(sel);
   const el = (tag, cls, html) => {
@@ -54,6 +66,10 @@
     }
     if (view.type === "evaluate") {
       app.appendChild(renderEvaluateView());
+      return;
+    }
+    if (view.type === "remodel") {
+      app.appendChild(renderRemodelView());
       return;
     }
     if (roles.length === 0) {
@@ -464,14 +480,15 @@
 
   // ============ 圣遗物录入弹窗（双模式）============
   function openArtifactModal(role, slot, mode, prefill) {
-    // mode: 'edit' 编辑已穿戴件（slot 锁定） | 'new' 录入新圣遗物（临时对象 → 评估）
+    // mode: 'edit' 编辑已穿戴件（slot 锁定） | 'new' 录入新圣遗物（临时对象 → 评估） | 'remodel' 录入重塑分析新件（临时对象 → 重塑分析）
     const isEdit = mode === "edit";
-    const isNew = mode === "new";
+    const isNew = mode === "new" || mode === "remodel";
+    const isRemodel = mode === "remodel";
     let formState = {
       slot: slot || "flower",
       set: "",
       mainStat: "",
-      level: 0,
+      level: isRemodel ? 20 : 0,    // 重塑分析录入：默认满级（算法四评估域，仍可改，保存时硬校验）
       substats: [
         { stat: "", value: "", activated: true },
         { stat: "", value: "", activated: true },
@@ -502,7 +519,8 @@
 
     let currentMode = "text"; // 'text' | 'manual'
     const body = el("div");
-    const title = isEdit ? `编辑 ${C.SLOTS[slot].name}` : "录入新圣遗物";
+    const title = isEdit ? `编辑 ${C.SLOTS[slot].name}`
+      : (isRemodel ? "录入要分析的新圣遗物（满级）" : "录入新圣遗物");
 
     // 模式切换 tabs
     const tabs = el("div", "mode-tabs",
@@ -746,7 +764,7 @@
     const foot = el("div");
     const btnClear = el("button", "btn", "清空");
     const btnCancel = el("button", "btn", "取消");
-    const btnSave = el("button", "btn btn-primary", isEdit ? "保存" : "保存并评估");
+    const btnSave = el("button", "btn btn-primary", isEdit ? "保存" : (isRemodel ? "保存并分析" : "保存并评估"));
     btnClear.addEventListener("click", resetForm);
     btnCancel.addEventListener("click", closeModal);
     btnSave.addEventListener("click", () => {
@@ -763,7 +781,23 @@
         });
         return;
       }
-      if (isEdit) {
+      if (isRemodel) {
+        // 重塑分析新件：仅满级（算法四评估域）→ 会话内临时列表（不落盘）
+        if (artifact.level < C.MAX_LEVEL) {
+          feedback.info({
+            title: "无法分析",
+            type: "warn",
+            message: `<div class="err-box">重塑分析仅支持满级（Lv.20）圣遗物。<br>当前等级 Lv.${artifact.level}，请将等级改为 20（游戏重塑界面仅对满级件开放）。</div>`,
+            confirmText: "知道了"
+          });
+          return;
+        }
+        remodelTempList.push(artifact);
+        closeModal();
+        if (view.type !== "remodel") view = { type: "remodel" };
+        render();
+        feedback.toast("已加入重塑分析列表（会话内有效）", "success");
+      } else if (isEdit) {
         // 编辑已穿戴件：直接保存到角色
         store.replaceArtifact(role.id, artifact.slot, artifact);
         closeModal();
@@ -1083,6 +1117,222 @@
     return wrap;
   }
 
+  // ============ 重塑分析（独立视图，算法四：安全网期望 + 三情况归属 + RV 排序）============
+
+  /** 三情况标签与偏差提示（按行动的 kind 映射；偏差方向固定：情况二高估 / 情况三低估，仅提示不进公式） */
+  function remodelCaseInfo(t) {
+    if (t.kind === "transfer") {
+      return { label: "同套转移", note: "未计打破原持有者套装的代价，实际收益略低" };
+    }
+    if (t.kind === "promote") {
+      return { label: "晋升套装件", note: "未计宿主凑套后再优化的收益，实际收益略高" };
+    }
+    return { label: "原地强化", note: "" };
+  }
+
+  /** 单件重塑分析卡（三层信息架构）：头行（来源+初始+RV）→ 副词条 → 主行（行动→对象 + 现状→期望）→ 操作行 → 短提示 → 折叠详情 */
+  function buildRemodelCard(row) {
+    const art = row.artifact;
+    const r = row.best.r;
+    const worth = r.rv > 0;
+    const card = el("div", "eval-case remodel-card" + (worth ? "" : " remodel-none"));
+
+    // 头：部位 · 套装 · 主词条（+来源）| 初始切换 + RV 徽章
+    const head = el("div", "c-head");
+    const srcTag = row.sourceRole
+      ? ` <i class="rm-src" title="录入自该角色的已穿戴件">来自 ${esc(row.sourceRole.name)}</i>`
+      : ` <i class="rm-src" title="会话内新录入件（游离件）：评估对象为装备其所属套装且有同部位同主属性件的角色">（新录入）</i>`;
+    head.innerHTML =
+      `<span class="c-title">${C.SLOTS[art.slot].name} · ${esc(art.set)} · ${esc(C.MAIN_SHORT[art.mainStat] || art.mainStat)}${srcTag}</span>`;
+    const headRight = el("span", "rm-head-right");
+    const inferred = core.inferInitialCount(art);
+    let initEl;
+    if (inferred != null) {
+      // 发数守恒唯一判定 → 初始数确定，仅静态展示（不提供切换，防误切）
+      initEl = el("span", "rm-init-static", `初始${inferred}`);
+      initEl.title = `由词条档位自动推断：总发数唯一判定为 ${inferred} 初始（= 可重掷强化 ${inferred === 3 ? 4 : 5} 次），确定值无需切换`;
+    } else {
+      initEl = el("button", "btn btn-sm rm-init", `初始${row.initialCount}`);
+      initEl.title = `档位两可/无判据，无法自动判定；点击切换 3/4 初始（游戏重塑界面直接标注）；当前 ${row.initialCount} 初始 = 可重掷强化 ${row.initialCount === 3 ? 4 : 5} 次`;
+      initEl.addEventListener("click", () => {
+        remodelInitOverride.set(row.signature, row.initialCount === 3 ? 4 : 3);
+        render();
+      });
+    }
+    const rvBadge = el("span", "badge " + (worth ? "badge-green" : "badge-gray"),
+      `RV ${r.rv >= 0 ? "+" : ""}${r.rv.toFixed(2)}`);
+    rvBadge.title = "RV = 重塑后期望分 − 功能位现状分（期望 ≠ 保证，重塑结果可预览后选择保留）";
+    headRight.append(initEl, rvBadge);
+    head.appendChild(headRight);
+    card.appendChild(head);
+
+    // 副词条行（展示用，弱化）
+    card.appendChild(el("div", "art-substats",
+      (art.substats || []).map(s =>
+        `${esc(C.MAIN_SHORT[s.stat] || s.stat)} ${s.value}${C.STAT_TYPE[s.stat] === "percent" ? "%" : ""}`).join(" · ")));
+
+    // 主行：行动 → 评估对象 ＋ 现状 → 期望（核心对比，视觉重心）
+    const best = row.best;
+    const ci = remodelCaseInfo(best);
+    const main = el("div", "rm-main");
+    main.innerHTML =
+      `<span class="rm-action"><i class="rm-case">${ci.label}</i><b class="rm-role" title="点击查看该角色详情">${esc(best.role.name)}</b></span>` +
+      `<span class="rm-flow">现状 ${r.currentScore.toFixed(2)} <i class="rm-arrow">→</i> 期望 <b>${r.eRemodel.toFixed(2)}</b></span>`;
+    card.appendChild(main);
+    main.querySelector(".rm-role").addEventListener("click", () => {
+      view = { type: "detail", roleId: best.role.id };
+      render();
+    });
+
+    // 操作行：建议指定 + 尘耗/效率（重塑时的操作指引）
+    const op = el("div", "rm-op");
+    op.innerHTML =
+      `<span>建议指定 <b class="rm-sug">${r.suggest.length ? r.suggest.map(esc).join(" + ") : "—"}</b></span>` +
+      `<span class="rm-dim">尘 ${r.dust} 枚 · ${r.rv >= 0 ? "+" : ""}${r.efficiency.toFixed(2)}/枚</span>`;
+    card.appendChild(op);
+
+    // 偏差提示（仅转移/晋升显示，短句）
+    if (ci.note) card.appendChild(el("div", "rm-note", "ⓘ " + ci.note));
+
+    // 折叠详情：保底线 / 组合上限 / 期望达成度 + 全部可评估对象
+    const det = el("details", "rm-detail");
+    det.innerHTML = `<summary>${row.all.length > 1 ? `详情 · 全部对象（${row.all.length}）` : "详情"}</summary>`;
+    det.appendChild(el("div", "rm-meta",
+      `<span>保底线 基础 <b>${r.floors.basic.toFixed(2)}</b> · 高阶 <b>${r.floors.advanced.toFixed(2)}</b> · 谕告 <b>${r.floors.oracle.toFixed(2)}</b></span>` +
+      `<span>组合上限 <b>${r.ceiling.toFixed(2)}</b></span>` +
+      `<span>期望达成度 <b>${(r.achieve * 100).toFixed(1)}%</b></span>`));
+    if (row.all.length > 1) {
+      row.all.slice(0, 8).forEach(t => {
+        const kindLabel = (REMODEL_KINDS.find(kd => kd.key === t.kind) || {}).label || "宿主";
+        const line = el("div", "rm-all-row");
+        line.innerHTML =
+          `<span class="ra-name"><i class="rm-case">${kindLabel}·</i>${esc(t.role.name)}</span>` +
+          `<span class="ra-rv ${t.r.rv >= 0 ? "diff-pos" : "diff-neg"}">${t.r.rv >= 0 ? "+" : ""}${t.r.rv.toFixed(2)}</span>` +
+          `<span class="ra-flow">${t.r.currentScore.toFixed(2)} → ${t.r.eRemodel.toFixed(2)}</span>`;
+        line.querySelector(".ra-name").addEventListener("click", () => {
+          view = { type: "detail", roleId: t.role.id };
+          render();
+        });
+        det.appendChild(line);
+      });
+      if (row.all.length > 8) {
+        det.appendChild(el("div", "rm-all-row rm-more",
+          `<span class="ra-name"></span><span>…其余 ${row.all.length - 8} 个对象 RV 更低</span>`));
+      }
+    }
+    det.title = "保底线 = 最坏分配下的确定性下限；组合上限由词条组合唯一决定，重塑无法突破（托底不抬天花板）";
+    card.appendChild(det);
+
+    // 会话内移除（仅新录入件）
+    if (!row.sourceRole) {
+      const rm = el("button", "btn btn-sm rm-del", "✕ 移除");
+      rm.title = "从重塑分析列表移除该新录入件";
+      rm.addEventListener("click", () => {
+        remodelTempList = remodelTempList.filter(a => a.id !== art.id);
+        render();
+      });
+      card.appendChild(rm);
+    }
+    return card;
+  }
+
+  /** 独立视图：圣遗物重塑分析（顶栏「重塑分析」入口）—— 扫描全部角色满级件 + 会话内新录入件 */
+  function renderRemodelView() {
+    const wrap = el("div");
+    const roles = store.getRoles();
+    const head = el("div", "detail-head");
+    head.appendChild(el("div", "detail-title", "圣遗物重塑分析"));
+    wrap.appendChild(head);
+
+    if (roles.length === 0) {
+      const empty = el("div", "empty",
+        '<div class="icon" aria-hidden="true">♻️</div>' +
+        '<div class="empty-title">还没有角色数据</div>' +
+        '<div class="empty-desc">重塑分析基于角色配置（有效词条与权值）判断哪些满级圣遗物值得消耗启圣之尘重塑。请先创建角色或导入数据。</div>');
+      const btn = el("button", "btn btn-primary", "＋ 新建角色");
+      btn.addEventListener("click", createRoleFlow);
+      empty.appendChild(btn);
+      wrap.appendChild(empty);
+      return wrap;
+    }
+
+    // 控制栏：保底档位切换 + 录入新件 + 三情况开关（原地强化/同套转移/晋升套装件） + 显示无价值件
+    const ctrl = el("div", "filter-bar");
+    const lblK = el("span", "filter-lbl", "保底档位");
+    const kSel = el("select");
+    kSel.title = "主排序用基础档（保守，不依赖账号圣言解明进度）；高阶/谕告档为攒满进度后的保底视角";
+    kSel.innerHTML =
+      `<option value="2">基础（保底 2 次）</option>` +
+      `<option value="3">高阶（保底 3 次）</option>` +
+      `<option value="4">谕告（保底 4 次）</option>`;
+    kSel.value = String(remodelK);
+    kSel.addEventListener("change", e => { remodelK = parseInt(e.target.value, 10) || 2; render(); });
+    const btnNew = el("button", "btn btn-primary", "＋ 录入新圣遗物");
+    btnNew.title = "录入满级新圣遗物加入本次分析（会话内有效，不写入角色）";
+    btnNew.addEventListener("click", () => openArtifactModal(null, null, "remodel"));
+    // 三情况开关：关闭的类型不参与评估，每件在开启范围内重新取 RV 最优行动（会话内状态，不落盘）
+    const kindLbl = el("span", "filter-lbl", "情况");
+    const kindToggles = REMODEL_KINDS.map(kd => {
+      const lbl = el("label", "rm-kind",
+        `<input type="checkbox" ${remodelKinds[kd.key] ? "checked" : ""}> ${kd.label}`);
+      lbl.title = kd.key === "self"
+        ? "套装件评自己：原地强化（现状分 = 自身评分）"
+        : kd.key === "transfer"
+          ? "套装件顶替「装备同套装且有同部位同主属性件」宿主的现有件"
+          : "散件（含新录入游离件）转移给装备其所属套装的宿主，凑更高件数套装";
+      lbl.querySelector("input").addEventListener("change", e => {
+        remodelKinds[kd.key] = e.target.checked; render();
+      });
+      return lbl;
+    });
+    const showAllLbl = el("label", "rm-showall",
+      `<input type="checkbox" ${remodelShowAll ? "checked" : ""}> 显示无价值件`);
+    showAllLbl.querySelector("input").addEventListener("change", e => {
+      remodelShowAll = e.target.checked; render();
+    });
+    ctrl.append(lblK, kSel, btnNew, kindLbl, ...kindToggles, showAllLbl);
+    wrap.appendChild(ctrl);
+    wrap.appendChild(el("div", "info",
+      "RV = 重塑后期望分 − 功能位现状分，> 0 表示值得花尘尝试（期望 ≠ 保证，结果可预览）。三情况开关任意组合，关闭的类型不参与评估；散件不评自身，新录入件按游离件评估。"));
+
+    // 候选 = 会话内新录入件（优先）+ 全角色已穿戴满级件（按签名去重）
+    const allCands = [];
+    const seenSig = new Set();
+    remodelTempList.forEach(a => {
+      const sig = core.remodelSignature(a);
+      if (!seenSig.has(sig)) { seenSig.add(sig); allCands.push({ artifact: a, sourceRole: null, signature: sig }); }
+    });
+    core.collectRemodelCandidates(roles).forEach(c => {
+      if (!seenSig.has(c.signature)) { seenSig.add(c.signature); allCands.push(c); }
+    });
+
+    const kindsOn = REMODEL_KINDS.filter(kd => remodelKinds[kd.key]).map(kd => kd.key);
+    const rows = kindsOn.length
+      ? core.analyzeRemodel(allCands, roles, remodelK,
+          c => { const inf = core.inferInitialCount(c.artifact); return inf ?? remodelInitOverride.get(c.signature) ?? 4; }, kindsOn)
+      : [];
+    const worth = rows.filter(x => x.best.r.rv > 0);
+    const excluded = kindsOn.length ? allCands.length - rows.length : 0;
+
+    const sum = el("div", "eval-summary " + (worth.length ? "valuable" : "no-case"));
+    sum.textContent = kindsOn.length
+      ? `✓ 扫描 ${allCands.length} 件满级圣遗物（含新录入 ${remodelTempList.length} 件）：${worth.length} 件有重塑价值（RV > 0）` +
+        (excluded ? `；${excluded} 件无可评估对象未列入（散件无宿主等）` : "")
+      : "⚠ 三种情况类型均已关闭：无行动可评估，请至少开启一种（原地强化 / 同套转移 / 晋升套装件）。";
+    wrap.appendChild(sum);
+
+    const shown = remodelShowAll ? rows : worth;
+    if (!shown.length) {
+      wrap.appendChild(el("div", "empty",
+        '<div class="icon" aria-hidden="true">✨</div>' +
+        '<div class="empty-title">暂无有重塑价值的圣遗物</div>' +
+        '<div class="empty-desc">RV ≤ 0 表示当前分配已接近该组合的重塑期望（托底不抬天花板）。可勾选「显示无价值件」查看全部，或录入新圣遗物。</div>'));
+    } else {
+      shown.forEach(row => wrap.appendChild(buildRemodelCard(row)));
+    }
+    return wrap;
+  }
+
   // ============ 角色配置弹窗 ============
   function openRoleConfigModal(role) {
     const body = el("div");
@@ -1268,6 +1518,11 @@
     $("#btnEvaluate").addEventListener("click", () => {
       const cur = store.getCurrentRole();
       view = { type: "evaluate", evalRoleId: cur ? cur.id : null };
+      render();
+    });
+
+    $("#btnRemodel").addEventListener("click", () => {
+      view = { type: "remodel" };
       render();
     });
 

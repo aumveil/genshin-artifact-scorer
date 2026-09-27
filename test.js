@@ -184,6 +184,262 @@ console.log("== 0 级副词条档位表（ROLL_TIERS）==");
   assert(C.ROLL_TIERS["元素充能效率"][0] === 4.5 && C.ROLL_TIERS["元素充能效率"][3] === 6.5, "充能档位 4.5/5.2/5.8/6.5", JSON.stringify(C.ROLL_TIERS["元素充能效率"]));
 }
 
+console.log("== 算法四：重塑价值评估（算法文档 五）==");
+{
+  // —— E[Y_k] 安全网期望表（5.2）——
+  assert(closeTo(core.expectedHits(5, 2), 2.71875, 1e-9), "E[Y_2](n=5) = 2.71875", core.expectedHits(5, 2));
+  assert(closeTo(core.expectedHits(5, 3), 3.21875, 1e-9), "E[Y_3](n=5) = 3.21875", core.expectedHits(5, 3));
+  assert(closeTo(core.expectedHits(5, 4), 4.03125, 1e-9), "E[Y_4](n=5) = 4.03125", core.expectedHits(5, 4));
+  assert(closeTo(core.expectedHits(4, 2), 2.375, 1e-9), "E[Y_2](n=4) = 2.375", core.expectedHits(4, 2));
+  assert(closeTo(core.expectedHits(4, 3), 3.0625, 1e-9), "E[Y_3](n=4) = 3.0625", core.expectedHits(4, 3));
+  assert(closeTo(core.expectedHits(4, 4), 4, 1e-9), "E[Y_4](n=4) = 4（保底拉满）", core.expectedHits(4, 4));
+
+  // —— 文档 5.7 示例：同组合（暴击/爆伤/大攻/精通，权值 1/1/0.8/0.6）不同分配 ——
+  const roleA = {
+    effectiveStats: ["暴击率", "暴击伤害", "攻击力百分比", "元素精通"],
+    weights: { "暴击率": 1.0, "暴击伤害": 1.0, "攻击力百分比": 0.8, "元素精通": 0.6 }
+  };
+  const 乙 = { slot: "flower", set: "X", mainStat: "生命值", level: 20, substats: [
+    { stat: "暴击率", value: 7.4, activated: true }, { stat: "暴击伤害", value: 7.8, activated: true },
+    { stat: "攻击力百分比", value: 5.8, activated: true }, { stat: "元素精通", value: 23, activated: true }] };
+  const 甲 = { slot: "flower", set: "X", mainStat: "生命值", level: 20, substats: [
+    { stat: "暴击率", value: 7.4, activated: true }, { stat: "暴击伤害", value: 14.6, activated: true },
+    { stat: "攻击力百分比", value: 10.5, activated: true }, { stat: "元素精通", value: 42, activated: true }] };
+
+  const rB = core.calcRemodel(乙, roleA, 2);
+  assert(!!rB, "乙件可计算", rB);
+  assert(closeTo(rB.currentScore, 4.2974, 1e-3), "乙 currentScore ≈ 4.30", rB.currentScore);
+  assert(closeTo(rB.eRemodel, 6.5583, 1e-3), "乙 E[remodel] ≈ 6.56（基础档）", rB.eRemodel);
+  assert(closeTo(rB.rv, 2.2608, 1e-3), "乙 RV ≈ +2.26", rB.rv);
+  assert(closeTo(rB.floors.basic, 4.59, 1e-9), "保底线 基础 = 4.59", rB.floors.basic);
+  assert(closeTo(rB.floors.advanced, 5.44, 1e-9), "保底线 高阶 = 5.44", rB.floors.advanced);
+  assert(closeTo(rB.floors.oracle, 6.29, 1e-9), "保底线 谕告 = 6.29", rB.floors.oracle);
+  assert(closeTo(rB.ceiling, 8.4, 1e-9), "组合上限 = 8.4", rB.ceiling);
+  assert(closeTo(rB.achieve, 6.55828125 / 8.4, 1e-6), "期望达成度 = E[remodel]/perfect", rB.achieve);
+  assert(rB.n === 5 && rB.dust === 1, "4 初始 n=5、花 1 尘", `${rB.n}/${rB.dust}`);
+  assert(rB.suggest.join(",") === "暴击率,暴击伤害", "建议指定词条 = 权值 top2", rB.suggest);
+
+  const rA = core.calcRemodel(甲, roleA, 2);
+  assert(closeTo(rA.currentScore, 6.31, 0.02), "甲 currentScore ≈ 6.31（算法一示例同件）", rA.currentScore);
+  assert(closeTo(rA.rv, 0.2451, 1e-3), "甲 RV ≈ +0.25（分配好 → 收益微小）", rA.rv);
+  assert(rA.rv < rB.rv, "同组合下分配差的乙 RV > 分配好的甲（组合好+分配歪才值得重塑）");
+
+  // 档位切换与 3 初始
+  assert(closeTo(core.calcRemodel(乙, roleA, 3).eRemodel, 6.685781, 1e-6), "高阶档 k=3 E[remodel] = 6.685781", core.calcRemodel(乙, roleA, 3).eRemodel);
+  assert(closeTo(core.calcRemodel(乙, roleA, 4).eRemodel, 6.892969, 1e-6), "谕告档 k=4 E[remodel] = 6.892969", core.calcRemodel(乙, roleA, 4).eRemodel);
+  const r3 = core.calcRemodel(乙, roleA, 2, 3);
+  assert(r3.n === 4, "3 初始 → n=4", r3.n);
+  assert(closeTo(r3.eRemodel, 5.875625, 1e-6), "3 初始 E[remodel] = 5.875625", r3.eRemodel);
+
+  // —— NGA 口径交叉验证（情形二：三有效角色 三条腿3有效，E=3.53125 词条 → 0.85×6.53125 当量）——
+  const roleSk = {
+    effectiveStats: ["暴击率", "暴击伤害", "攻击力百分比"],
+    weights: { "暴击率": 1.0, "暴击伤害": 1.0, "攻击力百分比": 1.0 }
+  };
+  const sk = { slot: "flower", set: "X", mainStat: "生命值", level: 20, substats: [
+    { stat: "暴击率", value: 3.9, activated: true }, { stat: "暴击伤害", value: 7.8, activated: true },
+    { stat: "攻击力百分比", value: 5.8, activated: true }, { stat: "防御力", value: 23, activated: true }] };
+  const rSk = core.calcRemodel(sk, roleSk, 3, 3);
+  assert(closeTo(rSk.eRemodel, 0.85 * 6.53125, 1e-9), "NGA 情形二：E[remodel] = 0.85×6.53125", rSk.eRemodel);
+
+  // —— 边界 ——
+  assert(core.calcRemodel(Object.assign({}, 乙, { level: 16 }), roleA, 2) === null, "未满级 → null");
+  const junk = { slot: "flower", set: "X", mainStat: "生命值", level: 20, substats: [
+    { stat: "防御力", value: 23, activated: true }, { stat: "生命值百分比", value: 5.8, activated: true },
+    { stat: "防御力百分比", value: 7.3, activated: true }, { stat: "生命值", value: 299, activated: true }] };
+  assert(core.calcRemodel(junk, roleA, 2) === null, "无有效词条 → null");
+
+  // —— 候选扫描去重 + 三情况归属 + 统一 RV 口径 + 互斥取最优 ——
+  const mkRole = (name, art, loose) => ({
+    id: name, name, looseSlot: loose || null,
+    effectiveStats: roleA.effectiveStats, weights: roleA.weights,
+    artifacts: { flower: art || null, plume: null, sands: null, goblet: null, circlet: null }
+  });
+  const roleJia = mkRole("甲角色", 甲);
+  const roleYi = mkRole("乙角色", 乙);
+  const roleDup = mkRole("重复-乙", JSON.parse(JSON.stringify(乙)));
+  const roles2 = [roleJia, roleYi, roleDup];
+  const cands = core.collectRemodelCandidates(roles2);
+  assert(cands.length === 2, "同签名圣遗物跨角色去重（3 角色 3 件 → 2 件）", cands.length);
+  assert(cands.every(c => !!c.sourceRole), "候选携带持有者引用（三情况归属判定依赖）");
+
+  const rows2 = core.analyzeRemodel(cands, roles2, 2);
+  const rowJia = rows2.find(x => x.artifact === 甲);
+  const rowYi = rows2.find(x => x.artifact === 乙);
+  assert(rows2.length === 2, "分析 2 件候选", rows2.length);
+  assert(rows2[0].best.r.rv >= rows2[1].best.r.rv, "按 RV 降序排列");
+  // 情况一：乙件（套装件）best = 自己（原地强化，baseline = 自身现状）
+  assert(rowYi.best.case === "self", "情况一：乙件最佳行动 = 原地强化", rowYi.best.case);
+  assert(rowYi.best.role.name === "乙角色", "情况一评估对象 = 持有者自身", rowYi.best.role.name);
+  assert(closeTo(rowYi.best.r.rv, 2.2608, 1e-3), "情况一 RV = 期望 − 自身现状 = 2.2608", rowYi.best.r.rv);
+  // 互斥取最优：甲件评自己 (+0.245) vs 转给乙角色 (+2.2608) → 选转移（情况二宿主）
+  assert(rowJia.best.case === "host", "互斥取最优：甲件选「重塑后转移乙角色」而非原地强化", rowJia.best.case);
+  assert(rowJia.best.role.name === "乙角色", "情况二评估对象 = 同套宿主", rowJia.best.role.name);
+  assert(closeTo(rowJia.best.r.rv, 2.2608, 1e-3), "情况二 RV = 期望 − 宿主现有件分", rowJia.best.r.rv);
+  assert(closeTo(rowJia.best.r.currentScore, 4.2974, 1e-3), "转移现状 = 宿主现有件评分（baseline 覆盖）", rowJia.best.r.currentScore);
+  assert(rowJia.all.length === 3, "甲件可评估对象 = 自己 + 2 个同套宿主", rowJia.all.length);
+
+  // 宿主条件（wearsSet + 同部位同主词条）+ 扣除口径：穿 X 套的偏置角色（花位全无效件）
+  const junkB = { slot: "flower", set: "X", mainStat: "生命值", level: 20, substats: [
+    { stat: "防御力", value: 23, activated: true }, { stat: "生命值百分比", value: 5.8, activated: true },
+    { stat: "防御力百分比", value: 7.3, activated: true }, { stat: "生命值", value: 299, activated: true }] };
+  const roleB = {
+    id: "B", name: "爆伤偏置", looseSlot: null,
+    effectiveStats: roleA.effectiveStats,
+    weights: { "暴击率": 0.6, "暴击伤害": 1.5, "攻击力百分比": 0.5, "元素精通": 0.5 },
+    artifacts: { flower: junkB, plume: null, sands: null, goblet: null, circlet: null }
+  };
+  const candYi = cands.find(c => c.artifact === 乙);
+  const rowsB = core.analyzeRemodel([candYi], [roleYi, roleB], 2);
+  assert(rowsB[0].best.case === "host" && rowsB[0].best.role.name === "爆伤偏置",
+    "宿主判定：穿同套且同部位同主词条 → 评宿主", rowsB[0].best.role.name);
+  assert(closeTo(rowsB[0].best.r.rv, 6.0310, 1e-3),
+    "扣除口径：RV = 6.0310 − 0（宿主现有件全无效 → baseline 0）", rowsB[0].best.r.rv);
+  assert(closeTo(rowsB[0].best.r.currentScore, 0, 1e-9), "转移现状 = 宿主现有件分（0）", rowsB[0].best.r.currentScore);
+  // 宿主现有件有分 → 必须扣除（与算法三替换口径一致；不扣除会误报 6.0310）
+  const roleB2 = Object.assign({}, roleB, { id: "B2", name: "爆伤偏置2", artifacts: { flower: {
+    slot: "flower", set: "X", mainStat: "生命值", level: 20,
+    substats: [{ stat: "暴击率", value: 7.8, activated: true }, { stat: "暴击伤害", value: 7.8, activated: true }]
+  }, plume: null, sands: null, goblet: null, circlet: null } });
+  const rowsB2 = core.analyzeRemodel([candYi], [roleYi, roleB2], 2);
+  assert(closeTo(rowsB2[0].best.r.rv, 6.031015625 - 2.7, 1e-3),
+    "扣除口径：宿主现有件 2.7 分 → RV = 3.3310", rowsB2[0].best.r.rv);
+
+  // 情况三：散件不评自身，仅评装备其所属套装的宿主
+  const looseFlower = { slot: "flower", set: "绝缘", mainStat: "生命值", level: 20, substats: [
+    { stat: "暴击率", value: 3.9, activated: true }, { stat: "暴击伤害", value: 7.8, activated: true }] };
+  const roleC = mkRole("散件持有者", looseFlower, "flower");
+  const roleD = mkRole("绝缘宿主", { slot: "flower", set: "绝缘", mainStat: "生命值", level: 20,
+    substats: [{ stat: "暴击率", value: 3.9, activated: true }] });
+  const rows3 = core.analyzeRemodel(
+    [{ artifact: looseFlower, sourceRole: roleC, signature: core.remodelSignature(looseFlower) }],
+    [roleC, roleD], 2);
+  assert(rows3.length === 1, "情况三：散件（绝缘花）仅评绝缘宿主", rows3.length);
+  assert(rows3[0].best.case === "host" && rows3[0].best.role.name === "绝缘宿主",
+    "情况三评估对象 = 装备其所属套装的宿主（不含持有者）", rows3[0].best.role.name);
+  assert(closeTo(rows3[0].best.r.rv, 3.0109, 1e-3),
+    "情况三 RV = 4.0109 − 1.0（宿主现有件分）", rows3[0].best.r.rv);
+  assert(rows3[0].all.length === 1, "散件的可评估对象不含持有者自身", rows3[0].all.length);
+  const rows4 = core.analyzeRemodel(
+    [{ artifact: looseFlower, sourceRole: roleC, signature: core.remodelSignature(looseFlower) }],
+    [roleC], 2);
+  assert(rows4.length === 0, "散件无宿主 → 不进列表", rows4.length);
+
+  // wearsSet 严格口径：散件位不算装备套装（散件恰为同套时不得误判为宿主）
+  const roleE = mkRole("散件恰同套", JSON.parse(JSON.stringify(looseFlower)), "flower");
+  assert(core.wearsSet(roleD, "绝缘") === true, "wearsSet：非散件部位有同套件 → true");
+  assert(core.wearsSet(roleE, "绝缘") === false,
+    "wearsSet 严格口径：仅散件位为同套 → false（散件位不算装备套装）");
+  const rowsE = core.analyzeRemodel(
+    [{ artifact: looseFlower, sourceRole: roleC, signature: core.remodelSignature(looseFlower) }],
+    [roleC, roleE], 2);
+  assert(rowsE.length === 0, "散件唯一同套持有者在散件位 → 非宿主，不进列表", rowsE.length);
+
+  // 新录入件（游离件）：无情况一，评全部同套宿主
+  const rows5 = core.analyzeRemodel(
+    [{ artifact: 乙, sourceRole: null, signature: core.remodelSignature(乙) }],
+    [roleJia, roleYi, roleDup], 2);
+  assert(rows5.length === 1 && rows5[0].best.case === "host",
+    "新录入件按游离件评宿主（无情况一）", rows5[0] && rows5[0].best.case);
+  assert(rows5[0].all.length === 3, "游离件可评估对象 = 3 个同套宿主", rows5[0].all.length);
+
+  // —— 三情况开关（allowedKinds）：关闭的类型不参与评估，每件在开启范围内重新取最优 ——
+  const selfEntryJia = rowJia.all.find(a => a.case === "self");
+  const rowsSelf = core.analyzeRemodel(cands, roles2, 2, null, ["self"]);
+  const rowJiaSelf = rowsSelf.find(x => x.artifact === 甲);
+  assert(rowJiaSelf.best.case === "self" && rowJiaSelf.best.kind === "self",
+    "仅开启原地强化：甲件最佳行动 = 自己", rowJiaSelf.best.case);
+  assert(closeTo(rowJiaSelf.best.r.rv, selfEntryJia.r.rv, 1e-9),
+    "仅原地强化：甲件 RV 与全开时自身口径一致（行内对象含 kind）", rowJiaSelf.best.r.rv);
+  assert(rowJiaSelf.all.length === 1, "仅原地强化：甲件只剩自己 1 个可评估对象", rowJiaSelf.all.length);
+
+  const rowsTrans = core.analyzeRemodel(cands, roles2, 2, null, ["transfer"]);
+  const rowYiTrans = rowsTrans.find(x => x.artifact === 乙);
+  assert(rowYiTrans.best.case === "host" && rowYiTrans.best.role.name === "重复-乙",
+    "仅开启同套转移：乙件自身被排除（持有者不算宿主），最佳 = 转移重复-乙", rowYiTrans.best.role.name);
+  assert(rowYiTrans.all.length === 2, "仅同套转移：乙件 2 个宿主对象（无自己）", rowYiTrans.all.length);
+  assert(closeTo(rowYiTrans.best.r.rv, 2.2608, 1e-3),
+    "仅同套转移：乙件 RV = 2.2608（baseline = 宿主现有件 4.2974）", rowYiTrans.best.r.rv);
+
+  const rowsProm = core.analyzeRemodel(cands, roles2, 2, null, ["promote"]);
+  assert(rowsProm.length === 0, "仅开启晋升套装件：套装件无此类行动 → 全部落榜", rowsProm.length);
+  const rowsPromLoose = core.analyzeRemodel(
+    [{ artifact: looseFlower, sourceRole: roleC, signature: core.remodelSignature(looseFlower) }],
+    [roleC, roleD], 2, null, ["promote"]);
+  assert(rowsPromLoose.length === 1 && rowsPromLoose[0].best.kind === "promote",
+    "仅晋升套装件：散件仍评绝缘宿主（kind = promote）", rowsPromLoose[0] && rowsPromLoose[0].best.kind);
+
+  const rowsMix = core.analyzeRemodel(
+    [
+      { artifact: 甲, sourceRole: roleJia, signature: core.remodelSignature(甲) },
+      { artifact: looseFlower, sourceRole: roleC, signature: core.remodelSignature(looseFlower) }
+    ],
+    [roleJia, roleYi, roleDup, roleC, roleD], 2, null, ["self", "promote"]);
+  const mixJia = rowsMix.find(x => x.artifact === 甲);
+  const mixLoose = rowsMix.find(x => x.artifact === looseFlower);
+  assert(mixJia && mixJia.best.kind === "self", "组合 [self+promote]：套装件取原地强化", mixJia && mixJia.best.kind);
+  assert(mixLoose && mixLoose.best.kind === "promote", "组合 [self+promote]：散件取晋升套装件", mixLoose && mixLoose.best.kind);
+
+  const rowsNone = core.analyzeRemodel(cands, roles2, 2, null, []);
+  assert(rowsNone.length === 0, "全关 → 无行动可评估，列表为空", rowsNone.length);
+}
+
+console.log("== 算法四补充：3/4 初始自动推断（inferInitialCount，单发档位分解）==");
+{
+  const mk = (subs, level) => ({ slot: "flower", set: "X", mainStat: "生命值", level: level ?? 20, substats: subs });
+  const s = (stat, value) => ({ stat, value, activated: true });
+
+  // 刚性 4 初始：各词条可行发数 k 均唯一，Σk = 1+2+2+4 = 9（仅可 4 初始 = 9 发）
+  const art4 = mk([
+    s("暴击率", 3.1),          // k∈{1}：31 为单发档位，两发最小 54
+    s("暴击伤害", 11.6),       // k∈{2}：54+62=116，一发不含 116、三发最小 162
+    s("元素充能效率", 11.0),   // k∈{2}：45+65=110，三发最小 135
+    s("防御力", 76)            // k∈{4}：19×4=76，三发最大 69、五发最小 80
+  ]);
+  assert(core.inferInitialCount(art4) === 4, "刚性 4 初始（Σk=9 唯一分解）→ 4", core.inferInitialCount(art4));
+
+  // 刚性 3 初始：Σk = 1+1+2+4 = 8（仅可 3 初始 = 8 发）
+  const art3 = mk([
+    s("暴击率", 3.1),          // k∈{1}
+    s("暴击伤害", 5.4),        // k∈{1}
+    s("攻击力百分比", 9.4),    // k∈{2}：41+53=94，三发最小 123
+    s("生命值", 836)           // k∈{4}：209×4=836，三发余数不整除、五发最小 1045
+  ]);
+  assert(core.inferInitialCount(art3) === 3, "刚性 3 初始（Σk=8 唯一分解）→ 3", core.inferInitialCount(art3));
+
+  // 两可：精通 80 可为 k=4（19×3+23）或 k=5（16×5），Σ=8（4+2+1+1）与 Σ=9（5+2+1+1）皆可 → null
+  const artAmb = mk([
+    s("元素精通", 80),
+    s("暴击率", 5.4),          // k∈{2}
+    s("暴击伤害", 5.4),        // k∈{1}
+    s("元素充能效率", 5.2)     // k∈{1}
+  ]);
+  assert(core.inferInitialCount(artAmb) === null, "档位两可（Σ=8/9 皆可）→ null 回退默认", core.inferInitialCount(artAmb));
+
+  // 异常/边界：值无法档位分解、未满级、副词条不足 4 条 → null
+  assert(core.inferInitialCount(mk([s("暴击率", 3.3), s("暴击伤害", 5.4), s("元素充能效率", 5.2), s("防御力", 76)])) === null,
+    "暴击率 3.3 无法档位分解 → null");
+  assert(core.inferInitialCount(Object.assign({}, art4, { level: 19 })) === null, "未满级 → null");
+  assert(core.inferInitialCount(mk(art4.substats.slice(0, 3))) === null, "副词条不足 4 条 → null");
+  // 待激活词条不计入判据：4 有效 + 1 待激活 → 仍按 4 条推断
+  const artPend = mk([...art4.substats, { stat: "生命值", value: 299, activated: false }]);
+  assert(core.inferInitialCount(artPend) === 4, "待激活词条不参与推断 → 4", core.inferInitialCount(artPend));
+
+  // 集成：analyzeRemodel 的 initialCountOf 接入推断 → 行内 n 与显式传 3 一致
+  const roleInf = {
+    id: "inf", name: "推断角色", looseSlot: null,
+    effectiveStats: ["暴击率", "暴击伤害", "攻击力百分比"],
+    weights: { "暴击率": 1.0, "暴击伤害": 1.0, "攻击力百分比": 0.8 },
+    artifacts: { flower: art3, plume: null, sands: null, goblet: null, circlet: null }
+  };
+  const candInf = { artifact: art3, sourceRole: roleInf, signature: core.remodelSignature(art3) };
+  const rowsInf = core.analyzeRemodel([candInf], [roleInf], 2, c => core.inferInitialCount(c.artifact));
+  assert(rowsInf.length === 1 && rowsInf[0].best.r.n === 4,
+    "集成：initialCountOf 走档位推断（3 初始）→ n=4 重掷次数", rowsInf[0] && rowsInf[0].best.r.n);
+  assert(closeTo(rowsInf[0].best.r.eRemodel, core.calcRemodel(art3, roleInf, 2, 3).eRemodel, 1e-9),
+    "集成：E[remodel] 与显式 3 初始完全一致");
+}
+
 console.log("== 文本识别（用户样例）==");
 {
   const text = "空之杯雷元素伤害加成7.0%+0·攻击力+4.1%·生命值+4.7%·元素充能效率+6.5%·防御力+19（待激活）角斗士的终幕礼：(0)";

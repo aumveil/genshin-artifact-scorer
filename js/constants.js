@@ -201,11 +201,19 @@
   const MAX_WEIGHT = 2;          // 词条权值上限
   const STORAGE_VERSION = 1;     // 数据结构版本
 
+  // 重塑（算法四，定稿算法文档第五章）：ROLL_AVG = 档位期望（70/80/90/100% 四档等概率）；
+  // DUST_COST = 启圣之尘单次消耗（花/羽 1、沙/杯/头 2，进度按尘数积累 → 各部位终保底总尘相同）；
+  // REMODEL_K = 保底档位（基础 2 / 高阶 3 / 谕告 4；主排序用基础档）
+  const ROLL_AVG = 0.85;
+  const DUST_COST = { flower: 1, plume: 1, sands: 2, goblet: 2, circlet: 2 };
+  const REMODEL_K = { basic: 2, advanced: 3, oracle: 4 };
+
   global.App = global.App || {};
   global.App.constants = {
     SLOTS, SLOT_KEYS, UMAX, STAT_TYPE, SUB_STATS, MAIN_STATS_BY_SLOT,
     SLOT_ALIASES, STAT_ALIASES, SETS, SET_ALIASES, ROLL_TIERS, MAIN_SHORT,
     ELEMENTS, ELEMENT_KEYS, CHARACTER_ELEMENT_HINTS,
-    MAX_LEVEL, MAX_ROLLS_PER_STAT, MIN_DIFF, MAX_WEIGHT, STORAGE_VERSION
+    MAX_LEVEL, MAX_ROLLS_PER_STAT, MIN_DIFF, MAX_WEIGHT, STORAGE_VERSION,
+    ROLL_AVG, DUST_COST, REMODEL_K
   };
 })(window);
