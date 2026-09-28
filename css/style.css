@@ -240,6 +240,26 @@ body {
   border: 1px solid var(--line-1); border-radius: var(--r-lg);
 }
 .filter-bar .filter-lbl { font-size: var(--fs-sm); color: var(--text-3); }
+/* 筛选路径标签页（按角色 / 按散件）：胶囊式，选中态品牌色描边 + 淡金底；整体高 30px 与下拉对齐 */
+.filter-tabs {
+  display: flex; gap: 2px; height: 30px; box-sizing: border-box; padding: 2px;
+  background: var(--bg-2); border: 1px solid var(--line-1); border-radius: var(--r-pill);
+}
+.filter-bar .ftab {
+  height: 100%; padding: 0 13px;
+  display: inline-flex; align-items: center;
+  border: 1px solid transparent; border-radius: var(--r-pill);
+  background: none; color: var(--text-3); font-family: inherit; font-size: var(--fs-md);
+  font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.filter-bar .ftab:hover { color: var(--text-1); }
+.filter-bar .ftab.active { color: var(--brand); border-color: var(--brand); background: rgba(217, 182, 74, 0.10); }
+/* 当前路径的条件区（与标签页以淡竖线分隔） */
+.filter-bar .filter-cond {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  border-left: 1px solid var(--line-1); padding-left: 8px;
+}
 /* 下拉与套装按钮同高（30px），保证筛选栏控件对齐 */
 .filter-bar select,
 .set-filter .set-btn { height: 30px; }
@@ -519,11 +539,6 @@ body {
 }
 .artifact-card .a-main {
   font-size: 17px; font-weight: 700; margin: 6px 0 8px;
-  display: flex; align-items: baseline; gap: 8px;
-}
-.artifact-card .a-main .v {
-  color: var(--text-1); font-weight: 600; font-size: 15px;
-  font-family: var(--font-num); font-variant-numeric: tabular-nums;
 }
 .artifact-card ul { list-style: none; flex: 1; }
 .artifact-card li {

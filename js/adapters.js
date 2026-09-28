@@ -154,10 +154,8 @@
             slot,
             set: setZh || item.setName,
             mainStat: mainZh || (item.mainTag && item.mainTag.name),
-            mainValue: item.mainTag ? monaValueToInternal(mainZh || (item.mainTag.name), item.mainTag.value) : null,
             level: item.level || 0,
-            substats,
-            note: "从莫娜占卜铺导入"
+            substats
           };
           byRole[roleName][slot] = artifact;
           equippedCount++;

@@ -463,7 +463,7 @@ console.log("== 文本识别：多行字段格式（用户样例）==");
   const res = parser.parseArtifactText(text);
   assert(res.result.slot === "flower", "部位 = 生之花", res.result.slot);
   assert(res.result.mainStat === "生命值", "主属性 = 生命值", res.result.mainStat);
-  assert(res.result.mainValue === 717, "主属性数值 = 717", res.result.mainValue);
+  assert(!("mainValue" in res.result), "识别结果不含 mainValue（主属性数值字段已移除）", Object.keys(res.result).join(","));
   assert(res.result.level === 0, "等级 = 0（星级行 +0）", res.result.level);
   assert(res.result.set === "角斗士的终幕礼", "套装 = 角斗士的终幕礼", res.result.set);
   assert(res.result.substats.length === 4, "副词条 4 条", JSON.stringify(res.result.substats));
@@ -485,8 +485,8 @@ console.log("== 文本识别：多行字段格式（用户样例）==");
   ];
   variants.forEach((v, vi) => {
     const rv = parser.parseArtifactText(v);
-    assert(rv.result.slot === "flower" && rv.result.mainStat === "生命值" && rv.result.mainValue === 717 && rv.result.level === 0,
-      `分行变体 ${vi + 1}: 部位/主属性/数值/等级 一致`, JSON.stringify(rv.result));
+    assert(rv.result.slot === "flower" && rv.result.mainStat === "生命值" && rv.result.level === 0,
+      `分行变体 ${vi + 1}: 部位/主属性/等级 一致`, JSON.stringify(rv.result));
     assert(rv.result.substats.length === 4 && rv.result.substats[3].stat === "攻击力百分比" && rv.result.substats[3].activated === false,
       `分行变体 ${vi + 1}: 副词条 4 条含待激活`, JSON.stringify(rv.result.substats.map(s => s.stat)));
     assert(rv.ok, `分行变体 ${vi + 1}: 零警告 ok=true`, JSON.stringify(rv.warnings));
@@ -680,6 +680,101 @@ console.log("== looseSlot 允许为空（无散件）==");
   assert(r2.hard.some(e => e.field === "looseSlot"), "looseSlot 非法值仍报错");
 }
 
+console.log("== 方案 A：无散件（looseSlot=null）自由位评估 ==");
+{
+  // 夹具：5 件同套（魔女）角色；looseSlot 可空 → 冗余位自动识别
+  const subs = [
+    { stat: "暴击率", value: 3.9, activated: true }, { stat: "暴击伤害", value: 7.8, activated: true },
+    { stat: "攻击力百分比", value: 5.8, activated: true }, { stat: "元素精通", value: 23, activated: true }];
+  const big = [
+    { stat: "暴击率", value: 7.8, activated: true }, { stat: "暴击伤害", value: 15.6, activated: true },
+    { stat: "攻击力百分比", value: 11.6, activated: true }, { stat: "元素精通", value: 23, activated: true }];
+  const MAIN = { flower: "生命值", plume: "攻击力", sands: "攻击力百分比", goblet: "火元素伤害加成", circlet: "暴击率" };
+  const mkArt = (slot, set, mainStat, level, substats) => ({ slot, set, mainStat, level, substats: JSON.parse(JSON.stringify(substats)) });
+  function mkRole(looseSlot, setOf) {
+    const arts = {};
+    Object.keys(MAIN).forEach(slot => { arts[slot] = mkArt(slot, setOf(slot), MAIN[slot], 20, subs); });
+    return {
+      looseSlot,
+      effectiveStats: ["暴击率", "暴击伤害", "攻击力百分比", "元素精通"],
+      weights: { "暴击率": 1.0, "暴击伤害": 1.0, "攻击力百分比": 0.8, "元素精通": 0.6 },
+      erRequirement: 180, currentER: 180,
+      artifacts: arts
+    };
+  }
+  const mag = () => "炽烈的炎之魔女";
+  const role5 = mkRole(null, mag);                       // 5 件全魔女（无散件）
+
+  // —— freeSlots 判定 ——
+  assert(core.freeSlots(role5).length === 5, "5 件全同套 → 5 个部位全为自由位", JSON.stringify(core.freeSlots(role5)));
+  assert(core.freeSlots(mkRole("goblet", mag)).join() === "goblet", "显式 looseSlot → 自由位仅该部位（既有语义不变）",
+    JSON.stringify(core.freeSlots(mkRole("goblet", mag))));
+  const role41 = mkRole(null, s => (s === "goblet" ? "流浪大地的乐团" : mag()));
+  assert(core.freeSlots(role41).join() === "goblet", "4 件同套 + 1 件异套 → 自由位仅那 1 件（冗余位）", JSON.stringify(core.freeSlots(role41)));
+  const role221 = mkRole(null, s => (s === "flower" || s === "plume") ? "A" : (s === "goblet" ? "C" : "B"));
+  assert(core.freeSlots(role221).length === 0, "2+2+1 分散套装 → 无自由位（保守不评估）", JSON.stringify(core.freeSlots(role221)));
+  const role4only = mkRole(null, mag); delete role4only.artifacts.circlet;
+  assert(core.freeSlots(role4only).length === 0, "仅录 4 件（缺 1 部位）→ 无自由位（无法判定）", JSON.stringify(core.freeSlots(role4only)));
+  // 「无散件」的三种等价写法（data.js 校验把空串与 null 同为合法值）必须同口径
+  assert(core.freeSlots(mkRole("", mag)).length === 5, "looseSlot 为空串 \"\" → 与 null 同口径（5 个自由位）", JSON.stringify(core.freeSlots(mkRole("", mag))));
+  const role5undef = mkRole(null, mag); role5undef.looseSlot = undefined;
+  assert(core.freeSlots(role5undef).length === 5, "looseSlot 字段缺失（undefined）→ 与 null 同口径", JSON.stringify(core.freeSlots(role5undef)));
+
+  // —— 异套件：修复前恒「无适用场景」，现按自由件评估 ——
+  const offCup = mkArt("goblet", "流浪大地的乐团", "火元素伤害加成", 20, big);
+  const ev = core.evaluateArtifact(offCup, role5);
+  const free = ev.results.find(r => r.case === "自由件");
+  assert(!!free, "五件套 + 异套件（同部位同主词条）→ 新增「自由件」情况", JSON.stringify(ev.results.map(r => r.case)));
+  assert(ev.results.length === 1 && free.isSetSwap === false, "自由件评估无 isSetSwap（looseSlot 为空时本无散件可失去）");
+  assert(ev.valuable && free.verdict === "建议替换", "自由件词条更高 → 有价值 / 建议替换", free && free.verdict);
+  assert(closeTo(free.currentScore, core.calcArtifactScore(role5.artifacts.goblet, role5)), "自由件比较基准 = 该部位当前件");
+
+  // —— 同套同主词条 → 仍走情况二，且不重复评估 ——
+  const onCup = mkArt("goblet", "炽烈的炎之魔女", "火元素伤害加成", 20, big);
+  const ev2 = core.evaluateArtifact(onCup, role5);
+  assert(ev2.results.length === 1 && ev2.results[0].case === "套装替换", "五件套 + 同套件 → 仅「套装替换」一条（不重复评估）",
+    JSON.stringify(ev2.results.map(r => r.case)));
+  assert(ev2.results[0].isSetSwap === undefined, "情况二不带 isSetSwap 标记");
+
+  // —— 主词条不同 → 仍不评估（替换语义要求主词条一致）——
+  const offSands = mkArt("sands", "流浪大地的乐团", "元素充能效率", 20, big);
+  const ev3 = core.evaluateArtifact(offSands, role5);
+  assert(ev3.results.length === 0 && ev3.summary === "无适用场景", "五件套 + 异套件但主词条不同 → 无适用场景", ev3.summary);
+
+  // —— 4+1（looseSlot=null）：仅冗余位可换异套件 ——
+  const ev4 = core.evaluateArtifact(mkArt("goblet", "角斗士的终幕礼", "火元素伤害加成", 20, big), role41);
+  assert(ev4.results.some(r => r.case === "自由件"), "4+1 无散件：冗余位（杯）换异套件 → 自由件", JSON.stringify(ev4.results.map(r => r.case)));
+  const ev5 = core.evaluateArtifact(mkArt("flower", "角斗士的终幕礼", "生命值", 20, big), role41);
+  assert(ev5.results.length === 0, "4+1 无散件：非冗余位（花）换异套件 → 不评估（会破坏 4 件套）", JSON.stringify(ev5.results.map(r => r.case)));
+  // 冗余位换成「所穿套装」件：isSetSwap 必须为 false（不误判情况三）
+  const ev6 = core.evaluateArtifact(mkArt("goblet", "炽烈的炎之魔女", "火元素伤害加成", 20, big), role41);
+  const free41 = ev6.results.find(r => r.case === "自由件");
+  assert(!!free41 && free41.isSetSwap === false, "4+1 无散件：冗余位换所穿套装件 → 自由件且不误判为情况三",
+    JSON.stringify(ev6.results.map(r => r.case + "/" + r.isSetSwap)));
+
+  // —— 显式 looseSlot 的既有行为回归 ——
+  const roleLoose = mkRole("goblet", mag);               // 显式散件位 = 杯（该件恰好也是同套）
+  const ev7 = core.evaluateArtifact(mkArt("goblet", "炽烈的炎之魔女", "火元素伤害加成", 20, big), roleLoose);
+  assert(ev7.results.length === 1 && ev7.results[0].case === "散件(变为套装件)" && ev7.results[0].isSetSwap === true,
+    "回归：显式 looseSlot 上替换同套件 → 仍识别为情况三", JSON.stringify(ev7.results.map(r => r.case)));
+  const ev8 = core.evaluateArtifact(mkArt("sands", "炽烈的炎之魔女", "攻击力百分比", 20, big), roleLoose);
+  assert(ev8.results.some(r => r.case === "套装替换"), "回归：非散件部位同套件 → 情况二", JSON.stringify(ev8.results.map(r => r.case)));
+
+  // —— 未满级自由件 → 值得强化 ——
+  const ev9 = core.evaluateArtifact(mkArt("goblet", "流浪大地的乐团", "火元素伤害加成", 0, big), role5);
+  const free9 = ev9.results.find(r => r.case === "自由件");
+  assert(!!free9 && free9.worthy && free9.verdict === "值得强化", "未满级自由件 → 值得强化", free9 && free9.verdict);
+
+  // —— 空串写法（looseSlot = ""）必须与 null 行为一致 ——
+  const roleEmpty = mkRole("", mag);
+  const evE1 = core.evaluateArtifact(offCup, roleEmpty);
+  assert(evE1.results.length === 1 && evE1.results[0].case === "自由件" && evE1.results[0].isSetSwap === false,
+    "looseSlot = \"\" + 异套件 → 自由件（空串不被当成散件位）", JSON.stringify(evE1.results.map(r => r.case)));
+  const evE2 = core.evaluateArtifact(onCup, roleEmpty);
+  assert(evE2.results.length === 1 && evE2.results[0].case === "套装替换" && !evE2.results[0].isSetSwap,
+    "looseSlot = \"\" + 同套件 → 情况二且不误判情况三", JSON.stringify(evE2.results.map(r => r.case + "/" + r.isSetSwap)));
+}
+
 console.log("== 莫娜占卜铺适配器（mona.json）==");
 {
   const fs = require("fs");
@@ -707,11 +802,11 @@ console.log("== 莫娜占卜铺适配器（mona.json）==");
   const slots = ["flower","plume","sands","goblet","circlet"];
   assert(slots.every(s => huto && huto.artifacts[s]), "胡桃 5 部位齐全");
 
-  // 词条数值单位转换：百分比 ×100（小数→百分数），数值不变
+  // 词条数值单位转换：百分比 ×100（小数→百分数），数值不变；废弃字段（mainValue / note）应已剥离
   const flower = huto && huto.artifacts.flower;
   if (flower) {
     assert(flower.mainStat === "生命值", "花主属性 = 生命值", flower.mainStat);
-    assert(closeTo(flower.mainValue, 4780, 1), "花主属性数值 4780（lifeStatic 为数值词条）", flower.mainValue);
+    assert(!("mainValue" in flower) && !("note" in flower), "导入件不含废弃字段 mainValue / note", Object.keys(flower).join(","));
     assert(flower.substats.length === 4, "副词条 4 条");
     flower.substats.forEach(s => {
       assert(!!C.SUB_STATS.includes(s.stat), "副词条词条名已中文化：" + s.stat, s.stat);
@@ -771,6 +866,22 @@ console.log("== storage.migrate 保留 customSets（自定义套装持久化回�
   assert(Array.isArray(m3.customSets) && m3.customSets.length === 0, "旧数据无 customSets → 空数组");
   const m4 = storage.migrate(null);
   assert(Array.isArray(m4.customSets) && m4.customSets.length === 0, "空/损坏数据 → emptyStore 含空 customSets");
+
+  // 废弃字段剥离（2026-09-28）：note（旧备注）/ mainValue（主属性数值）由 sanitizeStore 从历史数据中删除
+  const dirty = storage.migrate({
+    version: 1, exportedAt: null,
+    roles: [{
+      id: "r1", name: "测试",
+      artifacts: {
+        flower: { slot: "flower", set: "X", mainStat: "生命值", mainValue: 4780, level: 20, substats: [], note: "从莫娜占卜铺导入" },
+        plume: null
+      }
+    }],
+    customSets: []
+  });
+  const df = dirty.roles[0].artifacts.flower;
+  assert(!("note" in df) && !("mainValue" in df), "migrate 剥离废弃字段 note / mainValue", Object.keys(df).join(","));
+  assert(df.mainStat === "生命值" && df.level === 20 && df.set === "X", "剥离废弃字段不影响其余字段", JSON.stringify(df));
 }
 
 console.log("== storage 筛选状态持久化（刷新/重开恢复）==");
@@ -790,16 +901,36 @@ console.log("== storage 筛选状态持久化（刷新/重开恢复）==");
   }
   global.localStorage.clear();
   assert(storage.loadFilter() === null, "无筛选记录 → loadFilter 返回 null（回退默认「全部」）");
-  const ok = storage.saveFilter({ slot: "goblet", mainStat: "火元素伤害加成", sets: ["炽烈的炎之魔女", "炉火融炼之心"] });
-  const back = storage.loadFilter();
-  assert(ok === true && back && back.slot === "goblet" && back.mainStat === "火元素伤害加成" && back.sets.length === 2 && back.sets[1] === "炉火融炼之心", "saveFilter → loadFilter 往返一致", JSON.stringify(back));
+
+  // —— 新结构往返：落盘只保留当前路条件（两条互斥路径）——
+  const okLoose = storage.saveFilter({ mode: "loose", slot: "goblet", mainStat: "火元素伤害加成", sets: ["炽烈的炎之魔女"] });
+  const backLoose = storage.loadFilter();
+  assert(okLoose === true && backLoose && backLoose.mode === "loose" && backLoose.slot === "goblet"
+    && backLoose.mainStat === "火元素伤害加成" && backLoose.sets.length === 0,
+    "按散件往返一致（套装字段互斥清空）", JSON.stringify(backLoose));
+  const okRole = storage.saveFilter({ mode: "role", slot: "flower", mainStat: "生命值", sets: ["绝缘之旗印"] });
+  const backRole = storage.loadFilter();
+  assert(okRole === true && backRole && backRole.mode === "role" && backRole.sets.length === 1
+    && backRole.sets[0] === "绝缘之旗印" && backRole.slot === "" && backRole.mainStat === "",
+    "按角色往返一致（件级字段互斥清空）", JSON.stringify(backRole));
+
+  // —— 兼容旧结构 { slot, mainStat, sets }（无 mode）：有件级条件视为按散件，否则按角色 ——
+  global.localStorage.setItem(storage.FILTER_KEY, JSON.stringify({ slot: "flower", sets: "x" }));
+  const old1 = storage.loadFilter();
+  assert(old1 && old1.mode === "loose" && old1.slot === "flower" && old1.sets.length === 0,
+    "旧结构含件级条件 → 映射为按散件（sets 非数组 → 空）", JSON.stringify(old1));
+  global.localStorage.setItem(storage.FILTER_KEY, JSON.stringify({ slot: "flower", mainStat: 123, sets: ["A", 5, null] }));
+  const old2 = storage.loadFilter();
+  assert(old2 && old2.mode === "loose" && old2.mainStat === "" && old2.sets.length === 0,
+    "旧结构非法主属性/成员被过滤，且不与套装条件混用", JSON.stringify(old2));
+  global.localStorage.setItem(storage.FILTER_KEY, JSON.stringify({ sets: ["绝缘之旗印", 5] }));
+  const old3 = storage.loadFilter();
+  assert(old3 && old3.mode === "role" && old3.sets.length === 1 && old3.sets[0] === "绝缘之旗印" && old3.slot === "",
+    "旧结构仅套装条件 → 映射为按角色（非法成员被过滤）", JSON.stringify(old3));
+
+  // —— 损坏数据 ——
   global.localStorage.setItem(storage.FILTER_KEY, "{bad json");
   assert(storage.loadFilter() === null, "损坏 JSON → loadFilter 返回 null");
-  global.localStorage.setItem(storage.FILTER_KEY, JSON.stringify({ slot: "flower", sets: "x" }));
-  assert(storage.loadFilter() === null, "sets 非数组 → loadFilter 返回 null");
-  global.localStorage.setItem(storage.FILTER_KEY, JSON.stringify({ slot: "flower", mainStat: 123, sets: ["A", 5, null] }));
-  const f2 = storage.loadFilter();
-  assert(f2 && f2.sets.length === 1 && f2.sets[0] === "A" && f2.mainStat === "", "非字符串成员/主属性被过滤为合法形状", JSON.stringify(f2));
 }
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);

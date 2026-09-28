@@ -60,6 +60,8 @@
     if (res.error) {
       return { ok: false, message: res.error, rawPreview: JSON.stringify(raw, null, 2).slice(0, 2000) };
     }
+    // 剥离已废弃字段（历史备份可能携带 note / mainValue），再全量校验
+    global.App.storage.sanitizeStore(res.store);
     // 全量校验
     const errors = global.App.data.validateStore(res.store);
     if (errors.length > 0) {

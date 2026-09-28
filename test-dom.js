@@ -128,63 +128,74 @@ const path = require("path");
   console.log("排序后:", names.join(" > "));
   console.log("分数降序:", sortedOk ? "✓" : "✗", scores.map(s => s.toFixed(1)).join(" >= "));
 
-  // —— 筛选验证 ——
+  // —— 筛选验证（两条互斥路径：①按角色=套装 ②按散件=部位+主词条；切换即清空另一路）——
+  const tabBtn = key => app.querySelector('.filter-bar .filter-tabs .ftab[data-m="' + key + '"]');
   const filterSelects = () => app.querySelectorAll(".filter-bar select");
-  // ① 部位单独筛选：杯（「测试-正常」与「测试-导入式」的散件部位均为杯；按分数降序）
+  const listNames = () => Array.from(app.querySelectorAll(".role-card .rc-name")).map(n => n.textContent);
+  // 清除按钮按文本定位（套装面板内有「清空」按钮，避免误匹配）
+  const clearBtn = () => Array.from(app.querySelectorAll(".filter-bar .btn")).find(b => b.textContent.includes("清除"));
+
+  // ① 默认路径「按角色」：只渲染套装控件（无部位/主词条下拉），无条件下列出全部 3 个角色
+  console.log("路径①[按角色]默认:", tabBtn("role").classList.contains("active") ? "✓" : "✗",
+    "· 件级下拉数:", filterSelects().length, filterSelects().length === 0 ? "✓" : "✗",
+    "· 列表数:", listNames().length, listNames().length === 3 ? "✓" : "✗");
+
+  // ② 按角色：套装多选（≥2 件视为套装；面板内逐个勾选）
+  //    场景数据：测试-正常 5 件魔女；测试-无散件 1 件花魔女；测试-导入式 1 件花绝缘
+  app.querySelector(".set-filter .set-btn").click();   // 打开面板
+  await new Promise(r => setTimeout(r, 30));
+  const setCheck = name => Array.from(app.querySelectorAll(".set-item")).find(l => l.textContent.trim() === name).querySelector("input");
+  setCheck("炽烈的炎之魔女").click();
+  await new Promise(r => setTimeout(r, 30));
+  names = listNames();
+  console.log("路径①[魔女≥2件]:", names.join(", "), names.length === 1 && names[0] === "测试-正常" ? "✓" : "✗");
+  // 面板保持打开（局部刷新未重建），追加勾选「绝缘之旗印」→ 仍仅测试-正常（导入式仅 1 件绝缘，不满足 ≥2）
+  setCheck("绝缘之旗印").click();
+  await new Promise(r => setTimeout(r, 30));
+  names = listNames();
+  console.log("路径①[魔女+绝缘 ≥2件]:", names.join(", "), names.length === 1 && names[0] === "测试-正常" ? "✓" : "✗");
+
+  // ③ 切换到「按散件」：套装条件被清空（两条路不同时生效），该路出现部位/主词条下拉
+  tabBtn("loose").click();
+  await new Promise(r => setTimeout(r, 30));
+  console.log("路径切换[套装条件清空]:", tabBtn("loose").classList.contains("active") ? "✓ 切至按散件" : "✗",
+    "· 件级下拉数:", filterSelects().length, filterSelects().length === 2 ? "✓" : "✗",
+    "· 列表数:", listNames().length, listNames().length === 3 ? "✓（套装条件未生效）" : "✗");
+
+  // ④ 按散件·部位单独筛选：杯（「测试-正常」与「测试-导入式」的散件部位均为杯；按分数降序）
   let fSlot = filterSelects()[0];
   fSlot.value = "goblet";
   fSlot.dispatchEvent(new window.Event("change", { bubbles: true }));
   await new Promise(r => setTimeout(r, 30));
-  names = Array.from(app.querySelectorAll(".role-card .rc-name")).map(n => n.textContent);
-  console.log("筛选[杯]:", names.join(", "), names.length === 2 && names[0] === "测试-正常" ? "✓" : "✗");
-  // ② 混合筛选：杯 + 火元素伤害加成
+  names = listNames();
+  console.log("路径②[杯]:", names.join(", "), names.length === 2 && names[0] === "测试-正常" ? "✓" : "✗");
+
+  // ⑤ 按散件·部位 + 主词条 AND 叠加：杯 + 火元素伤害加成 → 仅测试-正常
   let fStat = filterSelects()[1];
   fStat.value = "火元素伤害加成";
   fStat.dispatchEvent(new window.Event("change", { bubbles: true }));
   await new Promise(r => setTimeout(r, 30));
-  names = Array.from(app.querySelectorAll(".role-card .rc-name")).map(n => n.textContent);
-  console.log("筛选[杯+火伤]:", names.join(", "), names.length === 1 && names[0] === "测试-正常" ? "✓" : "✗");
-  // ③ 清除后主属性单独筛选：生命值（3 个角色花都是生命值）——清除按钮按文本定位（套装面板内有「清空」按钮，避免误匹配）
-  const clearBtn = () => Array.from(app.querySelectorAll(".filter-bar .btn")).find(b => b.textContent.includes("清除"));
+  names = listNames();
+  console.log("路径②[杯+火伤]:", names.join(", "), names.length === 1 && names[0] === "测试-正常" ? "✓" : "✗");
+
+  // ⑥ 清除当前路条件（保留所在路径）→ 恢复全部
   clearBtn().click();
   await new Promise(r => setTimeout(r, 30));
+  console.log("路径②清除后(应3):", listNames().length, listNames().length === 3 ? "✓" : "✗",
+    tabBtn("loose").classList.contains("active") ? "· 仍在按散件路径 ✓" : "· ✗");
+
+  // ⑦ 按散件·主词条可脱离部位单独筛选：生命值（3 个角色花都是生命值）
   fStat = filterSelects()[1];
   fStat.value = "生命值";
   fStat.dispatchEvent(new window.Event("change", { bubbles: true }));
   await new Promise(r => setTimeout(r, 30));
-  names = Array.from(app.querySelectorAll(".role-card .rc-name")).map(n => n.textContent);
-  console.log("筛选[主属性=生命值]:", names.join(", "), names.length === 3 ? "✓" : "✗");
-  // ④ 清除筛选恢复全部
-  clearBtn().click();
-  await new Promise(r => setTimeout(r, 30));
-  names = Array.from(app.querySelectorAll(".role-card .rc-name")).map(n => n.textContent);
-  console.log("清除后数量(应3):", names.length, names.length === 3 ? "✓" : "✗");
+  names = listNames();
+  console.log("路径②[主词条=生命值]:", names.join(", "), names.length === 3 ? "✓" : "✗");
 
-  // —— 套装筛选验证（下拉多选；≥2 件固定视为套装，无件数选择器）——
-  // 场景数据：测试-正常 5 件魔女；测试-无散件 1 件花魔女；测试-导入式 1 件花绝缘
-  const setBtn = app.querySelector(".set-filter .set-btn");
-  setBtn.click();   // 打开面板
+  // ⑧ 切回「按角色」：件级条件被清空（互斥）
+  tabBtn("role").click();
   await new Promise(r => setTimeout(r, 30));
-  const setCheck = name => Array.from(app.querySelectorAll(".set-item")).find(l => l.textContent.trim() === name).querySelector("input");
-  // ① 勾选「炽烈的炎之魔女」（默认 ≥2 件）→ 仅测试-正常（5 件命中；无散件仅 1 件不命中）
-  setCheck("炽烈的炎之魔女").click();
-  await new Promise(r => setTimeout(r, 30));
-  names = Array.from(app.querySelectorAll(".role-card .rc-name")).map(n => n.textContent);
-  console.log("套装筛选[魔女≥2件]:", names.join(", "), names.length === 1 && names[0] === "测试-正常" ? "✓" : "✗");
-  // ② 面板保持打开（未重建），追加勾选「绝缘之旗印」→ 仍仅测试-正常（导入式仅 1 件绝缘，不满足 ≥2）
-  setCheck("绝缘之旗印").click();
-  await new Promise(r => setTimeout(r, 30));
-  names = Array.from(app.querySelectorAll(".role-card .rc-name")).map(n => n.textContent);
-  console.log("套装筛选[魔女+绝缘 ≥2件]:", names.join(", "), names.length === 1 && names[0] === "测试-正常" ? "✓" : "✗");
-  // ③ 面板内逐个取消勾选 → 恢复全部（套装面板已无「清空」按钮）
-  setCheck("炽烈的炎之魔女").click();
-  await new Promise(r => setTimeout(r, 30));
-  setCheck("绝缘之旗印").click();
-  await new Promise(r => setTimeout(r, 30));
-  names = Array.from(app.querySelectorAll(".role-card .rc-name")).map(n => n.textContent);
-  console.log("套装取消勾选后(应3):", names.length, names.length === 3 ? "✓" : "✗");
-  clearBtn().click();   // 兜底恢复
-  await new Promise(r => setTimeout(r, 30));
+  console.log("路径切换[件级条件清空]:", filterSelects().length === 0 && listNames().length === 3 ? "✓" : "✗");
 
   // —— 自定义套装置顶回归：添加的自定义套装必须出现在筛选面板列表最前（2026-08-23 修复）——
   App.store.addCustomSet("炉火融炼之心");
@@ -193,35 +204,48 @@ const path = require("path");
   const firstSet = app.querySelector(".set-filter .set-list .set-item span");
   console.log("自定义套装置顶:", firstSet ? firstSet.textContent : "（无）", firstSet && firstSet.textContent === "炉火融炼之心" ? "✓" : "✗");
 
-  // —— 筛选状态跨视图保持回归：筛选 → 进详情 → 返回，筛选保留（2026-08-23 修复）——
+  // —— 按散件路径：跨视图保持 + 持久化（落盘只含当前路条件）——
   {
+    tabBtn("loose").click();
+    await new Promise(r => setTimeout(r, 30));
     filterSelects()[0].value = "goblet";
     filterSelects()[0].dispatchEvent(new window.Event("change", { bubbles: true }));
     await new Promise(r => setTimeout(r, 30));
-    const preNames = Array.from(app.querySelectorAll(".role-card .rc-name")).map(n => n.textContent);
+    const preNames = listNames();
     console.log("筛选[杯]前置:", preNames.join(", "), preNames.length === 2 ? "✓" : "✗");
+
+    const savedRaw = window.localStorage.getItem(window.App.storage.FILTER_KEY);
+    const saved = savedRaw ? JSON.parse(savedRaw) : null;
+    console.log("散件筛选落盘:", saved && saved.mode === "loose" && saved.slot === "goblet"
+      && Array.isArray(saved.sets) && saved.sets.length === 0 ? "✓（套装字段互斥清空）" : "✗", savedRaw || "（无）");
+    const restored = window.App.storage.loadFilter();
+    console.log("loadFilter 恢复:", restored && restored.mode === "loose" && restored.slot === "goblet" ? "✓" : "✗");
+
     app.querySelector(".role-card").click();   // 进入第一个角色详情
     await new Promise(r => setTimeout(r, 30));
     const backBtn = Array.from(app.querySelectorAll(".detail-head .btn")).find(b => b.textContent.includes("返回"));
     if (backBtn) { backBtn.click(); await new Promise(r => setTimeout(r, 30)); }
     const keptSlot = filterSelects()[0] && filterSelects()[0].value;
-    const afterNames = Array.from(app.querySelectorAll(".role-card .rc-name")).map(n => n.textContent);
+    const afterNames = listNames();
     console.log("返回后筛选保留:", `slot=${keptSlot}`,
       keptSlot === "goblet" && afterNames.length === 2 && afterNames.includes("测试-正常") ? "✓" : "✗");
     clearBtn().click();   // 清理
     await new Promise(r => setTimeout(r, 30));
   }
 
-  // —— 筛选状态持久化（刷新/重开恢复）验证 ——
+  // —— 按角色路径：套装条件落盘（mode=role，件级字段为空）——
   {
-    filterSelects()[0].value = "goblet";
-    filterSelects()[0].dispatchEvent(new window.Event("change", { bubbles: true }));
+    tabBtn("role").click();
     await new Promise(r => setTimeout(r, 30));
-    const savedRaw = window.localStorage.getItem(window.App.storage.FILTER_KEY);
-    const saved = savedRaw ? JSON.parse(savedRaw) : null;
-    console.log("筛选已写入 localStorage:", saved && saved.slot === "goblet" ? "✓" : "✗", savedRaw || "（无）");
-    const restored = window.App.storage.loadFilter();
-    console.log("loadFilter 恢复:", restored && restored.slot === "goblet" ? "✓" : "✗");
+    app.querySelector(".set-filter .set-btn").click();
+    await new Promise(r => setTimeout(r, 30));
+    Array.from(app.querySelectorAll(".set-item")).find(l => l.textContent.trim() === "炽烈的炎之魔女").querySelector("input").click();
+    await new Promise(r => setTimeout(r, 30));
+    const savedRaw2 = window.localStorage.getItem(window.App.storage.FILTER_KEY);
+    const saved2 = savedRaw2 ? JSON.parse(savedRaw2) : null;
+    console.log("套装筛选落盘:", saved2 && saved2.mode === "role" && saved2.sets.length === 1
+      && saved2.sets[0] === "炽烈的炎之魔女" && saved2.slot === "" && saved2.mainStat === "" ? "✓" : "✗",
+      savedRaw2 || "（无）");
     clearBtn().click();   // 清理
     await new Promise(r => setTimeout(r, 30));
   }
@@ -330,6 +354,52 @@ const path = require("path");
     if (toggled !== 1) process.exitCode = 1;
     // 返回列表
     window.App.ui.render();
+  }
+
+  // —— 方案 A 冒烟：无散件（5 件全套装）角色的异套件评估（冗余位自动识别为自由位）——
+  {
+    role2.looseSlot = null;
+    role2.effectiveStats = ["暴击率", "暴击伤害", "攻击力百分比", "元素充能效率"];
+    role2.weights = { "暴击率": 1, "暴击伤害": 1, "攻击力百分比": 0.8, "元素充能效率": 0.6 };
+    role2.erRequirement = 180; role2.currentER = 180;
+    const MAIN2 = { flower: "生命值", plume: "攻击力", sands: "攻击力百分比", goblet: "火元素伤害加成", circlet: "暴击伤害" };
+    Object.keys(MAIN2).forEach(slot => {
+      role2.artifacts[slot] = {
+        id: App.store.genId(), slot, set: "炽烈的炎之魔女", mainStat: MAIN2[slot], level: 20,
+        substats: [{ stat: "暴击率", value: 3.9, activated: true }, { stat: "暴击伤害", value: 7.8, activated: true },
+                   { stat: "攻击力百分比", value: 5.8, activated: true }, { stat: "元素充能效率", value: 6.5, activated: true }]
+      };
+    });
+    App.store.updateRole(role2);
+    const freeSlots = App.core.freeSlots(role2);
+    console.log("五件套自由位:", freeSlots.length === 5 ? "✓" : "✗", `(${freeSlots.join(",") || "无"})`);
+    if (freeSlots.length !== 5) process.exitCode = 1;
+
+    window.document.getElementById("btnEvaluate").click();
+    await new Promise(r => setTimeout(r, 30));
+    const btnAdd = Array.from(app.querySelectorAll("button")).find(b => b.textContent.includes("录入新圣遗物"));
+    if (!btnAdd) { console.log("价值评估空态缺录入入口 ✗"); process.exitCode = 1; }
+    else {
+      btnAdd.click();
+      await new Promise(r => setTimeout(r, 30));
+      // 异套件（角斗士火伤杯，词条远高于五件套角色现有杯）
+      window.document.querySelector(".artifact-text").value =
+        "空之杯火元素伤害加成46.6%+20·暴击率+10.5%·暴击伤害+21.0%·攻击力百分比+13.5%·元素充能效率+16.5% 角斗士的终幕礼:(20)";
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "识别").click();
+      await new Promise(r => setTimeout(r, 30));
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "保存并评估").click();
+      await new Promise(r => setTimeout(r, 50));
+      // 自由件结果应落在 case-1（散件 / 自由件）优先级组内
+      const group1 = app.querySelector(".eval-case.case-1");
+      const names = group1 ? Array.from(group1.querySelectorAll(".row-role")).map(x => x.textContent) : [];
+      const okFree = names.includes("测试-无散件");
+      console.log("价值评估[五件套·异套件]:", okFree ? "✓" : "✗", `(case-1 组: ${names.join(", ") || "无"})`);
+      if (!okFree) process.exitCode = 1;
+      const legendTxt = app.querySelector(".legend") ? app.querySelector(".legend").textContent : "";
+      const okLg = /自由件/.test(legendTxt);
+      console.log("图例含自由件:", okLg ? "✓" : "✗", `(${legendTxt})`);
+      if (!okLg) process.exitCode = 1;
+    }
   }
 
   console.log("捕获错误:", window.__testErrors.length ? window.__testErrors : "无");

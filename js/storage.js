@@ -12,6 +12,24 @@
     return { version: C.STORAGE_VERSION, exportedAt: null, roles: [], customSets: [] };
   }
 
+  // —— 已废弃字段清理（2026-09-28）——
+  // note：旧备注字段（曾由莫娜适配器写入「从莫娜占卜铺导入」）；
+  // mainValue：主属性数值（不入库、不展示，算法本就不依赖）。
+  // 历史备份与旧 localStorage 数据经此剥离，保证数据结构干净。
+  const DEPRECATED_ARTIFACT_FIELDS = ["note", "mainValue"];
+  function sanitizeStore(store) {
+    if (!store || !Array.isArray(store.roles)) return store;
+    store.roles.forEach(role => {
+      const arts = (role && role.artifacts) || {};
+      C.SLOT_KEYS.forEach(key => {
+        const art = arts[key];
+        if (!art || typeof art !== "object") return;
+        DEPRECATED_ARTIFACT_FIELDS.forEach(f => { delete art[f]; });
+      });
+    });
+    return store;
+  }
+
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
@@ -41,37 +59,45 @@
       return emptyStore();
     }
     // 未来：if (raw.version === 1) {...转 v2...}
-    return {
+    return sanitizeStore({
       version: C.STORAGE_VERSION,
       exportedAt: raw.exportedAt || null,
       roles: raw.roles || [],
       customSets: Array.isArray(raw.customSets) ? raw.customSets : []
-    };
+    });
   }
 
   // —— 首页筛选状态持久化（刷新 / 重新打开页面时恢复上次筛选）——
+  // 结构：{ mode: "role" | "loose", slot, mainStat, sets }
+  //   mode = "role"  按角色路径：只筛套装（sets）
+  //   mode = "loose" 按散件路径：只筛散件部位（slot）与主词条（mainStat）
+  // 两条路径互斥（切换即清空另一路），故落盘时只保留当前路条件。
+  // 兼容旧结构 { slot, mainStat, sets }（无 mode）：有件级条件（slot/mainStat）视为「按散件」，否则视为「按角色」。
   function loadFilter() {
     try {
       const raw = localStorage.getItem(FILTER_KEY);
       if (!raw) return null;
       const d = JSON.parse(raw);
-      if (!d || typeof d !== "object" || !Array.isArray(d.sets)) return null;
-      return {
-        slot: typeof d.slot === "string" ? d.slot : "",
-        mainStat: typeof d.mainStat === "string" ? d.mainStat : "",
-        sets: d.sets.filter(s => typeof s === "string")
-      };
+      if (!d || typeof d !== "object") return null;
+      const slot = typeof d.slot === "string" ? d.slot : "";
+      const mainStat = typeof d.mainStat === "string" ? d.mainStat : "";
+      const sets = Array.isArray(d.sets) ? d.sets.filter(s => typeof s === "string") : [];
+      const mode = (d.mode === "loose" || d.mode === "role")
+        ? d.mode
+        : ((slot || mainStat) ? "loose" : "role");
+      return mode === "loose"
+        ? { mode, slot, mainStat, sets: [] }               // 按散件：套装条件不参与（互斥）
+        : { mode, slot: "", mainStat: "", sets };          // 按角色：件级条件不参与（互斥）
     } catch (e) {
       return null;   // 损坏数据 → 返回 null，由调用方回退默认筛选
     }
   }
   function saveFilter(f) {
     try {
-      const data = {
-        slot: (f && f.slot) || "",
-        mainStat: (f && f.mainStat) || "",
-        sets: (f && Array.isArray(f.sets)) ? f.sets : []
-      };
+      const mode = (f && f.mode === "loose") ? "loose" : "role";
+      const data = mode === "loose"
+        ? { mode, slot: (f && f.slot) || "", mainStat: (f && f.mainStat) || "", sets: [] }
+        : { mode, slot: "", mainStat: "", sets: (f && Array.isArray(f.sets)) ? f.sets : [] };
       localStorage.setItem(FILTER_KEY, JSON.stringify(data));
       return true;
     } catch (e) {
@@ -80,5 +106,5 @@
   }
 
   global.App = global.App || {};
-  global.App.storage = { load, save, migrate, emptyStore, KEY, FILTER_KEY, loadFilter, saveFilter };
+  global.App.storage = { load, save, migrate, emptyStore, sanitizeStore, KEY, FILTER_KEY, loadFilter, saveFilter };
 })(window);

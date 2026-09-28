@@ -13,9 +13,11 @@
 
   let view = { type: "list" };            // {type:'list'} | {type:'detail', roleId} | {type:'evaluate'} | {type:'remodel'}
   // 首页筛选状态：独立于 view（切视图不丢失），并持久化到 localStorage（刷新/重开恢复上次筛选）
+  // 结构 { mode: "role" | "loose", slot, mainStat, sets } —— 两条互斥路径（①按角色②按散件），仅当前路条件生效
   let listFilter = (typeof global.App.storage.loadFilter === "function" && global.App.storage.loadFilter())
-    || { slot: "", mainStat: "", sets: [] };
+    || { mode: "role", slot: "", mainStat: "", sets: [] };
   const persistFilter = () => { try { global.App.storage.saveFilter(listFilter); } catch (e) { /* 静默 */ } };
+  let setPanelOutsideHandler = null;      // 套装下拉「点击面板外关闭」的全局监听（复用同一 handler，避免重复渲染累积）
   let pendingArtifact = null;             // 新圣遗物临时对象（评估用）
   let evalHidden = new Set();             // 评估会话内被手动移除的有提升角色 id（重新录入/放弃时清空）
 
@@ -166,10 +168,12 @@
 
   function renderRoleList(roles) {
     const wrap = el("div");
-    // 筛选状态：散件部位 / 主属性 / 套装多选（≥2 件命中视为套装，固定无件数选择；叠加 AND）
-    // 状态存于模块级 listFilter（独立于 view），进详情/评估页返回后保持
+    // 筛选分两条互斥路径（标签页切换，切换即清空另一路；状态存模块级 listFilter，独立于 view）：
+    //   ① 按角色 mode="role" ：只筛套装（该角色已录入件中属于所选套装的件数 ≥ 2）
+    //   ② 按散件 mode="loose"：只筛散件部位（role.looseSlot）与主词条（该部位已录入件的 mainStat）
     const f = listFilter;
     if (!Array.isArray(f.sets)) f.sets = [];
+    if (f.mode !== "role" && f.mode !== "loose") f.mode = "role";
     const allMain = [...new Set(C.SLOT_KEYS.flatMap(s => C.MAIN_STATS_BY_SLOT[s] || []))];
     // 语义校验（持久化恢复的旧数据 / 套装列表变化后）：非法部位连主属性一起清；主属性不在候选则清
     if (f.slot && !C.SLOT_KEYS.includes(f.slot)) { f.slot = ""; f.mainStat = ""; }
@@ -182,9 +186,19 @@
     (store.getCustomSets() || []).forEach(s => { if (!allSets.includes(s)) allSets.push(s); });
     C.SETS.forEach(s => { if (!allSets.includes(s)) allSets.push(s); });
 
-    // —— 筛选计算（部位/主属性/套装 三条件叠加 AND）——
+    // —— 筛选计算（按 mode 走单一路径；两条路不同时生效）——
     function computeFiltered() {
       return roles.filter(role => {
+        if (f.mode === "role") {
+          if (!f.sets.length) return true;                      // 未选套装 → 不筛
+          // 套装判定：已录入圣遗物中套装 ∈ 所选集合的件数 ≥ 2（2 件套即算套装，固定阈值）
+          const hit = C.SLOT_KEYS.filter(s => {
+            const art = role.artifacts && role.artifacts[s];
+            return !!(art && art.set && f.sets.includes(art.set));
+          }).length;
+          return hit >= 2;
+        }
+        // 按散件：散件部位 + 主词条（AND 叠加；两者均可单独使用）
         if (f.slot && role.looseSlot !== f.slot) return false;
         if (f.mainStat) {
           if (f.slot) {
@@ -193,80 +207,99 @@
           }
           return C.SLOT_KEYS.some(s => role.artifacts[s] && role.artifacts[s].mainStat === f.mainStat);
         }
-        if (f.sets.length) {
-          // 套装判定：已录入圣遗物中套装 ∈ 所选集合的件数 ≥ 2（2 件套即算套装，固定阈值）
-          const hit = C.SLOT_KEYS.filter(s => {
-            const art = role.artifacts && role.artifacts[s];
-            return !!(art && art.set && f.sets.includes(art.set));
-          }).length;
-          if (hit < 2) return false;
-        }
         return true;
       });
     }
+    /** 当前路是否设置了条件（决定 info 提示条显示） */
+    const isActive = () => f.mode === "role" ? f.sets.length > 0 : !!(f.slot || f.mainStat);
 
-    // —— 筛选栏：散件部位 → 主属性 → 套装（下拉多选）→ 清除 ——
+    // —— 筛选栏：路径标签页（按角色 / 按散件）+ 当前路条件 + 清除 ——
     const fBar = el("div", "filter-bar");
-    const lblSlot = el("span", "filter-lbl", "散件部位");
-    const slotSel = el("select");
-    slotSel.innerHTML = '<option value="">全部</option>' + C.SLOT_KEYS.map(k =>
-      `<option value="${k}" ${f.slot === k ? "selected" : ""}>${C.SLOTS[k].name}</option>`).join("");
-    const lblStat = el("span", "filter-lbl", "主属性");
-    const statSel = el("select");
-    const statCandidates = f.slot ? (C.MAIN_STATS_BY_SLOT[f.slot] || []) : allMain;
-    statSel.innerHTML = '<option value="">全部</option>' + statCandidates.map(s =>
-      `<option value="${esc(s)}" ${f.mainStat === s ? "selected" : ""}>${esc(s)}</option>`).join("");
+    const tabs = el("div", "filter-tabs");
+    [{ key: "role", label: "按角色", tip: "按套装筛选角色：已录入件中属于所选套装的件数 ≥ 2" },
+     { key: "loose", label: "按散件", tip: "按散件筛选角色：散件部位 + 该部位的主词条" }].forEach(p => {
+      const tab = el("button", "ftab" + (f.mode === p.key ? " active" : ""), p.label);
+      tab.type = "button";
+      tab.dataset.m = p.key;      // 路径标识（role / loose），便于测试与调试定位
+      tab.title = p.tip;
+      tab.addEventListener("click", () => {
+        if (listFilter.mode === p.key) return;
+        // 切换即清空另一路条件（两条路不同时生效）
+        listFilter = { mode: p.key, slot: "", mainStat: "", sets: [] };
+        persistFilter();
+        render();
+      });
+      tabs.appendChild(tab);
+    });
+
+    const condBox = el("div", "filter-cond");
     const btnClear = el("button", "btn btn-sm", "✕ 清除");
 
-    // —— 套装筛选（下拉多选面板：checkbox 列表；≥2 件视为套装，固定无件数选择）——
-    const setBox = el("div", "set-filter");
-    const setBtnText = () => f.sets.length
-      ? `套装 ${f.sets.length}套 ▾`
-      : "套装 ▾";
-    const setBtn = el("button", "btn btn-sm set-btn", setBtnText());
-    const panel = el("div", "set-dropdown hidden");
-    const list = el("div", "set-list");
-    allSets.forEach(name => {
-      const lab = el("label", "set-item");
-      lab.innerHTML = `<input type="checkbox" ${f.sets.includes(name) ? "checked" : ""}><span>${esc(name)}</span>`;
-      lab.querySelector("input").addEventListener("change", e => {
-        if (e.target.checked) { if (!f.sets.includes(name)) f.sets.push(name); }
-        else f.sets = f.sets.filter(s => s !== name);
-        setBtn.textContent = setBtnText();
-        persistFilter();   // 持久化筛选状态（刷新/重开恢复）
-        updateResults();   // 局部刷新，面板保持打开可连续勾选
+    if (f.mode === "role") {
+      // —— ① 按角色：套装多选（下拉 checkbox 面板；≥2 件视为套装，固定无件数选择）——
+      const setBox = el("div", "set-filter");
+      const setBtnText = () => f.sets.length ? `套装 ${f.sets.length}套 ▾` : "套装 ▾";
+      const setBtn = el("button", "btn btn-sm set-btn", setBtnText());
+      const panel = el("div", "set-dropdown hidden");
+      const list = el("div", "set-list");
+      allSets.forEach(name => {
+        const lab = el("label", "set-item");
+        lab.innerHTML = `<input type="checkbox" ${f.sets.includes(name) ? "checked" : ""}><span>${esc(name)}</span>`;
+        lab.querySelector("input").addEventListener("change", e => {
+          if (e.target.checked) { if (!f.sets.includes(name)) f.sets.push(name); }
+          else f.sets = f.sets.filter(s => s !== name);
+          setBtn.textContent = setBtnText();
+          persistFilter();   // 持久化筛选（刷新/重开恢复）
+          updateResults();   // 局部刷新，面板保持打开可连续勾选
+        });
+        list.appendChild(lab);
       });
-      list.appendChild(lab);
-    });
-    panel.appendChild(list);
-    setBox.append(setBtn, panel);
-    setBtn.addEventListener("click", e => {
-      e.stopPropagation();
-      panel.classList.toggle("hidden");
-    });
-    // 点击面板外关闭
-    document.addEventListener("click", e => {
-      if (!setBox.contains(e.target)) panel.classList.add("hidden");
-    });
+      panel.appendChild(list);
+      setBox.append(setBtn, panel);
+      setBtn.addEventListener("click", e => {
+        e.stopPropagation();
+        panel.classList.toggle("hidden");
+      });
+      // 点击面板外关闭（复用同一 handler，避免重复渲染累积监听器）
+      if (setPanelOutsideHandler) document.removeEventListener("click", setPanelOutsideHandler);
+      setPanelOutsideHandler = e => { if (!setBox.contains(e.target)) panel.classList.add("hidden"); };
+      document.addEventListener("click", setPanelOutsideHandler);
+      condBox.appendChild(setBox);
+    } else {
+      // —— ② 按散件：散件部位 + 主词条（主词条候选随部位联动；两者均可单独使用）——
+      if (setPanelOutsideHandler) { document.removeEventListener("click", setPanelOutsideHandler); setPanelOutsideHandler = null; }
+      const lblSlot = el("span", "filter-lbl", "散件部位");
+      const slotSel = el("select");
+      slotSel.innerHTML = '<option value="">全部</option>' + C.SLOT_KEYS.map(k =>
+        `<option value="${k}" ${f.slot === k ? "selected" : ""}>${C.SLOTS[k].name}</option>`).join("");
+      const lblStat = el("span", "filter-lbl", "主属性");
+      const statSel = el("select");
+      const statCandidates = f.slot ? (C.MAIN_STATS_BY_SLOT[f.slot] || []) : allMain;
+      statSel.innerHTML = '<option value="">全部</option>' + statCandidates.map(s =>
+        `<option value="${esc(s)}" ${f.mainStat === s ? "selected" : ""}>${esc(s)}</option>`).join("");
+      slotSel.addEventListener("change", e => {
+        listFilter.slot = e.target.value;
+        // 部位变更 → 主词条候选联动；原主词条不在新候选内则清空
+        const cands = listFilter.slot ? (C.MAIN_STATS_BY_SLOT[listFilter.slot] || []) : allMain;
+        if (listFilter.mainStat && !cands.includes(listFilter.mainStat)) listFilter.mainStat = "";
+        persistFilter();   // 持久化筛选（刷新/重开恢复）
+        render();
+      });
+      statSel.addEventListener("change", e => {
+        listFilter.mainStat = e.target.value;
+        persistFilter();   // 持久化筛选（刷新/重开恢复）
+        render();
+      });
+      condBox.append(lblSlot, slotSel, lblStat, statSel);
+    }
 
-    slotSel.addEventListener("change", e => {
-      listFilter.slot = e.target.value;
-      const cands = listFilter.slot ? (C.MAIN_STATS_BY_SLOT[listFilter.slot] || []) : allMain;
-      if (listFilter.mainStat && !cands.includes(listFilter.mainStat)) listFilter.mainStat = "";
-      persistFilter();   // 持久化筛选状态（刷新/重开恢复）
-      render();
-    });
-    statSel.addEventListener("change", e => {
-      listFilter.mainStat = e.target.value;
-      persistFilter();   // 持久化筛选状态（刷新/重开恢复）
-      render();
-    });
     btnClear.addEventListener("click", () => {
-      listFilter = { slot: "", mainStat: "", sets: [] };
-      persistFilter();   // 清除同样落盘，刷新后保持「全部」
+      // 清除当前路径的条件（保留所在路径），刷新后保持无条件
+      listFilter = { mode: listFilter.mode, slot: "", mainStat: "", sets: [] };
+      persistFilter();
       render();
     });
-    fBar.append(lblSlot, slotSel, lblStat, statSel, setBox, btnClear);
+    fBar.append(tabs, condBox, btnClear);
     wrap.appendChild(fBar);
 
     // —— 结果区（信息 + 列表/空态），套装勾选时局部刷新 ——
@@ -279,12 +312,11 @@
       const filtered = computeFiltered();
       const sorted = [...filtered].sort((a, b) =>
         core.calcCharacterScore(b).percent - core.calcCharacterScore(a).percent);
-      const active = !!(f.slot || f.mainStat || f.sets.length);
-      if (active) {
+      if (isActive()) {
         infoEl.textContent = `筛选 ${filtered.length}/${roles.length} 个角色` +
-          (f.slot ? ` · 散件·${C.SLOTS[f.slot].name}` : "") +
-          (f.mainStat ? ` · ${f.mainStat}` : "") +
-          (f.sets.length ? ` · 套装 ${f.sets.join("、")}（≥2件）` : "") +
+          (f.mode === "role"
+            ? ` · 套装 ${f.sets.join("、")}（≥2件）`
+            : (f.slot ? ` · 散件·${C.SLOTS[f.slot].name}` : "") + (f.mainStat ? ` · ${f.mainStat}` : "")) +
           `，按分数降序`;
         infoEl.style.display = "";
       } else {
@@ -298,8 +330,8 @@
           '<div class="empty-desc">试试调整筛选条件，或清除筛选查看全部角色。</div>');
         const btnC = el("button", "btn", "✕ 清除筛选");
         btnC.addEventListener("click", () => {
-          listFilter = { slot: "", mainStat: "", sets: [] };
-          persistFilter();   // 清除同样落盘，刷新后保持「全部」
+          listFilter = { mode: listFilter.mode, slot: "", mainStat: "", sets: [] };
+          persistFilter();   // 清除同样落盘，刷新后保持无条件
           render();
         });
         empty.appendChild(btnC);
@@ -437,8 +469,7 @@
       `<span class="a-slot">${C.SLOTS[slot].name}${isLoose ? ' <i class="a-loose-tag">散</i>' : ""}</span>` +
       `<span class="a-level">Lv.${art.level}</span></div>` +
       `<div class="a-set">${esc(art.set)}</div>` +
-      // 主属性数值：百分比词条加 %，数值词条（花·生命值 / 羽·攻击力）不加
-      `<div class="a-main">${esc(art.mainStat)}${art.mainValue ? `<span class="v">${art.mainValue}${C.STAT_TYPE[art.mainStat] === "percent" ? "%" : ""}</span>` : ""}</div>` +
+      `<div class="a-main">${esc(art.mainStat)}</div>` +
       `<ul>${subsHtml}</ul>` +
       `<div class="a-foot">` +
       `<span class="a-score">${sScore.toFixed(2)} 词条</span>` +
@@ -828,14 +859,15 @@
 
   // ============ 价值评估（独立视图 + 弹窗共用渲染）============
 
-  /** 情况优先级：情况三（套装件替换散件）> 情况二（套装件替换）> 情况一（散件替换） */
+  /** 情况优先级：情况三（套装件替换散件）> 情况二（套装件替换）> 情况一（散件/自由件替换） */
   function caseRank(r) {
     return r.isSetSwap ? 3 : (r.case === "套装替换" ? 2 : 1);
   }
   /** 情况类别短词（弹窗用，无「情况 X」编号） */
   function caseLabel(r) {
-    return r.case === "套装替换" ? "套装件替换"
-      : (r.isSetSwap ? "套装件替换散件" : "散件替换");
+    if (r.case === "套装替换") return "套装件替换";
+    if (r.isSetSwap) return "套装件替换散件";
+    return r.case === "自由件" ? "自由件替换" : "散件替换";
   }
 
   /** 待评估新圣遗物摘要卡（独立页与弹窗共用）：主信息一行 + 副词条一行，紧凑显示
@@ -866,7 +898,7 @@
     const sum = el("div", "eval-summary " +
       (res.valuable ? "valuable" : (res.results.length === 0 ? "no-case" : "no-value")));
     sum.textContent = res.valuable ? "✓ 有价值"
-      : (res.results.length === 0 ? "⚠ 无适用场景（该部位不是散件部位，且无同套装同主词条的已穿戴件）" : "✗ 无价值");
+      : (res.results.length === 0 ? "⚠ 无适用场景（该部位不是散件/自由位，且无同套装同主词条的已穿戴件）" : "✗ 无价值");
     box.appendChild(sum);
 
     if (res.results.length === 0) {
@@ -1016,7 +1048,7 @@
     wrap.appendChild(el("div", "legend",
       `<span class="lg"><i class="sw s3"></i>套装件替换散件 · 最高优先</span>` +
       `<span class="lg"><i class="sw s2"></i>套装件替换</span>` +
-      `<span class="lg"><i class="sw s1"></i>散件替换</span>`));
+      `<span class="lg"><i class="sw s1"></i>散件 / 自由件替换</span>`));
 
     // 按情况分组（优先级：情况三 > 二 > 一），组内每角色一行紧凑显示
     const groups = { 3: [], 2: [], 1: [] };
@@ -1348,7 +1380,7 @@
     let looseOpts = `<option value="" ${!role.looseSlot ? "selected" : ""}>（无散件 / 全套装）</option>` +
       C.SLOT_KEYS.map(k =>
         `<option value="${k}" ${role.looseSlot === k ? "selected" : ""}>${C.SLOTS[k].name}</option>`).join("");
-    fLoose.innerHTML = `<label>散件部位（5 件全套装可选「无散件」）</label><select id="cLoose">${looseOpts}</select>`;
+    fLoose.innerHTML = `<label>散件部位（5 件全套装可选「无散件」，此时按自由位自动评估）</label><select id="cLoose">${looseOpts}</select>`;
     const fEr = el("div", "form-row",
       `<div class="field"><label>充能需求 (%)</label><input id="cEr" type="number" min="100" value="${isFinite(role.erRequirement) ? role.erRequirement : ""}"></div>` +
       `<div class="field"><label>当前面板充能 (%)</label><input id="cER" type="number" min="100" value="${isFinite(role.currentER) ? role.currentER : ""}"></div>`);

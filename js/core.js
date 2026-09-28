@@ -189,25 +189,63 @@
   }
 
   /**
-   * 主入口：评估新圣遗物的所有潜在使用方式（情况一/二/三 + 汇总）
+   * looseSlot 是否显式设置了散件位。
+   * null / undefined / 空串 三者均表示「无散件」——data.js 的校验把空串与 null 同为合法值
+   * （「允许为空 = 无散件」），持久化/导入的历史数据可能带空串，算法层必须同口径处理。
+   */
+  function hasLooseSlot(role) {
+    const ls = role && role.looseSlot;
+    return ls != null && ls !== "";
+  }
+
+  /**
+   * 自由位判定（方案 A，2026-09-28）：该角色当前「可自由替换」的部位列表——
+   * 即换成异套件也不会损失套装效果的位置（散件位 / 冗余位）。
+   * - 显式设置了 looseSlot：仅该部位（既有语义完全不变）
+   * - looseSlot 为空（无散件 / 全套装）：部位 S 可自由替换 ⟺ 除 S 外其余 4 件均已录入且同属一套
+   *   - 5 件全同套 → 5 个部位全为自由位：任意一件都是冗余件，换掉后仍是 4 件套（原神无 5 件套效果，不损失加成）
+   *   - 4 件同套 + 1 件异套 → 仅那 1 件（真正的冗余位）
+   *   - 2+2+1 等分散套装 → 无自由位（换掉任一件都会破坏 2 件套）→ 保守不评估
+   */
+  function freeSlots(role) {
+    if (!role) return [];
+    if (hasLooseSlot(role)) return [role.looseSlot];
+    const arts = role.artifacts || {};
+    return C.SLOT_KEYS.filter(slot => {
+      if (!arts[slot]) return false;                      // 该部位未录入 → 无被替换件
+      const others = C.SLOT_KEYS.filter(k => k !== slot).map(k => arts[k]);
+      if (others.some(a => !a || !a.set)) return false;    // 其余部位未录全 → 无法判定
+      return others.every(a => a.set === others[0].set);   // 其余 4 件同套 → 该部位可自由替换
+    });
+  }
+
+  /**
+   * 主入口：评估新圣遗物的所有潜在使用方式（情况一/一′ 自由件/二/三 + 汇总）
    * @returns {Object} {valuable, summary, results:[{case,...evaluateAgainst 结果}]}
    */
   function evaluateArtifact(newArtifact, role) {
     const results = [];
-    // 情况一/三：作为散件（部位 = 散件部位 且 主词条与被替换散件一致——主词条不同不算替换）
-    const oldLoose = role.artifacts && role.artifacts[role.looseSlot];
-    if (role.looseSlot != null && newArtifact.slot === role.looseSlot && oldLoose
-        && newArtifact.mainStat === oldLoose.mainStat) {
-      const r = evaluateAgainst(newArtifact, oldLoose, role);
-      // 情况三：新件是角色所穿套装的部件 → 替换后散件部位变为套装件（角色失去散件）
-      r.isSetSwap = isSetPiece(newArtifact, role);
-      r.case = r.isSetSwap ? "散件(变为套装件)" : "散件";
+    const equipped = role.artifacts && role.artifacts[newArtifact.slot];
+
+    // 情况二：作为套装件（同部位、该部位是套装件而非散件、同套装、同主词条）
+    const isSetReplace = !!(equipped && newArtifact.slot !== role.looseSlot
+      && newArtifact.set === equipped.set && newArtifact.mainStat === equipped.mainStat);
+
+    // 情况一/一′/三：作为散件（looseSlot 显式指定）或自由件（looseSlot 为空 → 冗余位自动识别）
+    // 要求部位 ∈ 自由位 且 主词条与被替换件一致（主词条不同不算替换）；
+    // 同套同主词条已由情况二覆盖（同一被替换件、同一公式），此处跳过以免重复评估
+    if (!isSetReplace && equipped && newArtifact.mainStat === equipped.mainStat
+        && freeSlots(role).includes(newArtifact.slot)) {
+      const r = evaluateAgainst(newArtifact, equipped, role);
+      // 情况三：新件是角色所穿套装的部件 → 替换后散件部位变为套装件（角色失去散件）。
+      // 仅在显式配置了散件位时成立——looseSlot 为空（null/undefined/空串）时本无散件可失去（自由位即冗余位）
+      const hasLoose = hasLooseSlot(role);
+      r.isSetSwap = hasLoose && isSetPiece(newArtifact, role);
+      r.case = hasLoose ? (r.isSetSwap ? "散件(变为套装件)" : "散件") : "自由件";
       results.push(r);
     }
-    // 情况二：作为套装件（同部位、该部位是套装件而非散件、同套装、同主词条）
-    const equipped = role.artifacts && role.artifacts[newArtifact.slot];
-    if (equipped && newArtifact.slot !== role.looseSlot
-        && newArtifact.set === equipped.set && newArtifact.mainStat === equipped.mainStat) {
+
+    if (isSetReplace) {
       const r = evaluateAgainst(newArtifact, equipped, role);
       r.case = "套装替换";
       results.push(r);
@@ -438,7 +476,7 @@
   global.App = global.App || {};
   global.App.core = {
     calcArtifactScore, calcPerfect, calcEnergyPenalty, calcCharacterScore,
-    maxW, remaining, ERContrib, evaluateAgainst, evaluateArtifact,
+    maxW, remaining, ERContrib, evaluateAgainst, evaluateArtifact, freeSlots,
     expectedHits, calcRemodel, remodelSignature, inferInitialCount, collectRemodelCandidates, wearsSet, remodelTargets, analyzeRemodel
   };
 })(window);

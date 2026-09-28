@@ -121,7 +121,7 @@
     //    等级依据 +N 判断（不依赖星级行 ★）：
     //    - 独立等级片段（整体为 ★*+N / +N / Lv.N）→ 从片段流中提取并跳过
     //    - 紧凑格式主属性片段内数值后的 +N 尾巴
-    let mainStat = null, mainValue = null, level = null;
+    let mainStat = null, level = null;
     let subText = "";   // 副词条段（套装出现之前）
     if (slotPos >= 0) {
       // 部位之后 → 套装之前的内容
@@ -150,8 +150,8 @@
         const firstParsed = parseStatSegment(segParts[0]);
         if (firstParsed) {
           // ===== 紧凑格式：主属性段 = 第一个片段「词条名+数值(+N)」=====
+          // 该片段中的数值仅用于定位分段（主属性数值不入库、算法不依赖）
           mainStat = firstParsed.stat;
-          mainValue = firstParsed.value;
           if (firstParsed.warning) warnings.push(firstParsed.warning);
           // 等级提取二：主属性段数值后的 +N / Lv.N（如 雷元素伤害加成7.0%+0 → 0）
           if (level === null) {
@@ -170,7 +170,6 @@
             if (i < segParts.length) {
               const v = parseMainValueLine(segParts[i]);
               if (v !== null) {
-                mainValue = v.value;
                 i++;
                 // 主属性名歧义消解：数值攻击力/生命值/防御力 的数值带 % → 对应百分比词条
                 // （如「时之沙 攻击力 46.6%」→ 攻击力百分比，不与副词条数值「攻击力」冲突）
@@ -249,7 +248,6 @@
     const result = {
       slot, set, setUnknown,      // setUnknown：true = 启发式识别出的新套装（不在内置/自定义列表），需调用方确认
       mainStat,
-      mainValue: mainValue,       // 仅展示用，算法不依赖
       level: level,               // 可能为 null
       substats: substats.slice(0, 4),
       raw: t
