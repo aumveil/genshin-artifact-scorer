@@ -610,6 +610,58 @@ const path = require("path");
     }
   }
 
+  // —— 套装筛选特殊项「其他 / 不判套装」（套装字段为空：留空 + 未录全）——
+  {
+    const rn = App.store.newRole("测试-其他");     // newRole → sets = [] 且 5 部位未录全 ⇒ roleSets = []
+    App.store.updateRole(rn);
+    window.document.getElementById("logoBtn").click();
+    await new Promise(r => setTimeout(r, 40));
+    const tabRole = app.querySelector('.filter-tabs .ftab[data-m="role"]');
+    if (tabRole && !tabRole.classList.contains("active")) { tabRole.click(); await new Promise(r => setTimeout(r, 40)); }
+    app.querySelector(".set-filter .set-btn").click();
+    await new Promise(r => setTimeout(r, 40));
+    const labNone = Array.from(app.querySelectorAll(".set-item")).find(l => /其他 \/ 不判套装/.test(l.textContent));
+    console.log("套装面板含「其他 / 不判套装」项:", labNone ? "✓" : "✗");
+    if (!labNone) process.exitCode = 1;
+    else {
+      // 特殊项应位于滚动列表之外（始终可见）
+      const inScroll = !!app.querySelector(".set-list .set-item-none");
+      console.log("「其他」项固定在滚动区外:", !inScroll ? "✓" : "✗");
+      if (inScroll) process.exitCode = 1;
+      labNone.querySelector("input").click();
+      await new Promise(r => setTimeout(r, 60));
+      let nn = listNames();
+      const okNone = nn.length === 1 && nn[0] === "测试-其他";
+      console.log("路径①[其他]:", nn.join(", "), okNone ? "✓" : "✗", "（应仅 测试-其他）");
+      if (!okNone) process.exitCode = 1;
+      const btnTxt = app.querySelector(".set-filter .set-btn").textContent;
+      console.log("按钮文案（其他不计入「N套」）:", btnTxt.trim(), /其他/.test(btnTxt) && !/1套/.test(btnTxt) ? "✓" : "✗");
+      if (!/其他/.test(btnTxt) || /1套/.test(btnTxt)) process.exitCode = 1;
+      // 叠加真实套装「绝缘之旗印」→ 并集（测试-其他 + 测试-导入式 + 测试-套装，后者经「按实况更新」后含绝缘）
+      const labIns = Array.from(app.querySelectorAll(".set-item")).find(l => l.textContent.trim() === "绝缘之旗印");
+      labIns.querySelector("input").click();
+      await new Promise(r => setTimeout(r, 60));
+      nn = listNames();
+      const okUnion = nn.length === 3
+        && ["测试-其他", "测试-导入式", "测试-套装"].every(n => nn.includes(n));
+      console.log("路径①[其他+绝缘]:", nn.join(", "), okUnion ? "✓" : "✗");
+      if (!okUnion) process.exitCode = 1;
+      // 落盘应保留 sentinel，loadFilter 能原样恢复
+      const savedRaw = window.localStorage.getItem(window.App.storage.FILTER_KEY);
+      const saved = savedRaw ? JSON.parse(savedRaw) : null;
+      const restored = window.App.storage.loadFilter();
+      const okPersist = !!saved && saved.sets.length === 2 && saved.sets.includes("__no_set__")
+        && !!restored && restored.sets.includes("__no_set__");
+      console.log("「其他」筛选落盘/恢复:", okPersist ? "✓" : "✗", savedRaw || "（无）");
+      if (!okPersist) process.exitCode = 1;
+      clearBtn().click();   // 清理
+      await new Promise(r => setTimeout(r, 50));
+      nn = listNames();
+      console.log("清除后恢复全部:", nn.length, nn.length === 6 ? "✓" : "✗", `(${nn.join(", ")})`);
+      if (nn.length !== 6) process.exitCode = 1;
+    }
+  }
+
   // —— 角色配置弹窗「取消」不得污染内存对象（2026-10-09 修：弹窗入口深拷贝 role）——
   {
     window.document.getElementById("logoBtn").click();

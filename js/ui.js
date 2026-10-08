@@ -17,6 +17,11 @@
   let listFilter = (typeof global.App.storage.loadFilter === "function" && global.App.storage.loadFilter())
     || { mode: "role", slot: "", mainStat: "", sets: [] };
   const persistFilter = () => { try { global.App.storage.saveFilter(listFilter); } catch (e) { /* 静默 */ } };
+  // 套装筛选的**特殊项** sentinel：代表「套装字段为空」——即 core.roleSets(role) 为 [] 的角色，
+  // 含两类：① 字段留空（＝「其他」）② 5 部位未录全（当这个角色不存在）。两者在详情页都显示为「其他 / 不判套装」。
+  // 用一个内部 token 而非空串，避免与真实套装名/空值混淆；loadFilter 只校验「是字符串」，故可随筛选一起持久化。
+  const SET_FILTER_EMPTY = "__no_set__";
+  const setLabel = s => s === SET_FILTER_EMPTY ? "其他 / 不判套装" : s;
   let setPanelOutsideHandler = null;      // 套装下拉「点击面板外关闭」的全局监听（复用同一 handler，避免重复渲染累积）
   let pendingArtifact = null;             // 新圣遗物临时对象（评估用）
   let evalHidden = new Set();             // 评估会话内被手动移除的有提升角色 id（重新录入/放弃时清空）
@@ -192,8 +197,11 @@
         if (f.mode === "role") {
           if (!f.sets.length) return true;                      // 未选套装 → 不筛
           // 套装判定（2026-10-09）：读角色套装字段 —— 命中 ⟺ roleSets(role) 与所选集合有交集。
-          // 不再按「已录入件中该套装 ≥ 2 件」计数；未录全（当这个角色不存在）与留空（「其他」）的角色不命中。
-          return core.roleSets(role).some(s => f.sets.includes(s));
+          // 不再按「已录入件中该套装 ≥ 2 件」计数。
+          // 特殊项 SET_FILTER_EMPTY = 「套装字段为空」（roleSets 为 []，含留空与未录全）→ 单独命中。
+          const rs = core.roleSets(role);
+          const wantEmpty = f.sets.includes(SET_FILTER_EMPTY);
+          return (wantEmpty && rs.length === 0) || rs.some(s => f.sets.includes(s));
         }
         // 按散件：散件部位 + 主词条（AND 叠加；两者均可单独使用）
         if (f.slot && role.looseSlot !== f.slot) return false;
@@ -213,7 +221,7 @@
     // —— 筛选栏：路径标签页（按角色 / 按散件）+ 当前路条件 + 清除 ——
     const fBar = el("div", "filter-bar");
     const tabs = el("div", "filter-tabs");
-    [{ key: "role", label: "按角色", tip: "按套装筛选角色：角色所穿套装（角色配置中的套装构成）包含所选套装" },
+    [{ key: "role", label: "按角色", tip: "按套装筛选角色：角色所穿套装（角色配置中的套装字段）包含所选套装；也可单独勾选「其他 / 不判套装」筛出未声明套装的角色" },
      { key: "loose", label: "按散件", tip: "按散件筛选角色：散件部位 + 该部位的主词条" }].forEach(p => {
       const tab = el("button", "ftab" + (f.mode === p.key ? " active" : ""), p.label);
       tab.type = "button";
@@ -235,23 +243,42 @@
     if (f.mode === "role") {
       // —— ① 按角色：套装多选（下拉 checkbox 面板；判定读角色套装字段 role.sets，不数件数）——
       const setBox = el("div", "set-filter");
-      const setBtnText = () => f.sets.length ? `套装 ${f.sets.length}套 ▾` : "套装 ▾";
+      // 按钮文案：真实套装数 + 特殊项「其他」（分列，避免把「其他」算成一套）
+      const setBtnText = () => {
+        if (!f.sets.length) return "套装 ▾";
+        const n = f.sets.filter(s => s !== SET_FILTER_EMPTY).length;
+        const parts = [];
+        if (n) parts.push(`${n}套`);
+        if (f.sets.includes(SET_FILTER_EMPTY)) parts.push("其他");
+        return `套装 ${parts.join("+")} ▾`;
+      };
       const setBtn = el("button", "btn btn-sm set-btn", setBtnText());
       const panel = el("div", "set-dropdown hidden");
       const list = el("div", "set-list");
-      allSets.forEach(name => {
-        const lab = el("label", "set-item");
-        lab.innerHTML = `<input type="checkbox" ${f.sets.includes(name) ? "checked" : ""}><span>${esc(name)}</span>`;
+      // 勾选/取消的公共处理（真实套装项与「其他」特殊项共用）
+      const bindSetItem = (lab, value) => {
         lab.querySelector("input").addEventListener("change", e => {
-          if (e.target.checked) { if (!f.sets.includes(name)) f.sets.push(name); }
-          else f.sets = f.sets.filter(s => s !== name);
+          if (e.target.checked) { if (!f.sets.includes(value)) f.sets.push(value); }
+          else f.sets = f.sets.filter(s => s !== value);
           setBtn.textContent = setBtnText();
           persistFilter();   // 持久化筛选（刷新/重开恢复）
           updateResults();   // 局部刷新，面板保持打开可连续勾选
         });
+      };
+      allSets.forEach(name => {
+        const lab = el("label", "set-item");
+        lab.innerHTML = `<input type="checkbox" ${f.sets.includes(name) ? "checked" : ""}><span>${esc(name)}</span>`;
+        bindSetItem(lab, name);
         list.appendChild(lab);
       });
       panel.appendChild(list);
+      // 特殊项固定放在滚动区**之外**（套装列表很长，避免被滚走）：套装字段为空（其他 / 不判套装）
+      panel.appendChild(el("div", "set-sep"));
+      const labNone = el("label", "set-item set-item-none");
+      labNone.innerHTML = `<input type="checkbox" ${f.sets.includes(SET_FILTER_EMPTY) ? "checked" : ""}>` +
+        `<span title="套装字段为空：含「留空（其他）」与「5 部位未录全（当这个角色不存在）」两类">其他 / 不判套装</span>`;
+      bindSetItem(labNone, SET_FILTER_EMPTY);
+      panel.appendChild(labNone);
       setBox.append(setBtn, panel);
       setBtn.addEventListener("click", e => {
         e.stopPropagation();
@@ -312,7 +339,7 @@
       if (isActive()) {
         infoEl.textContent = `筛选 ${filtered.length}/${roles.length} 个角色` +
           (f.mode === "role"
-            ? ` · 套装 ${f.sets.join("、")}`
+            ? ` · 套装 ${f.sets.map(setLabel).join("、")}`
             : (f.slot ? ` · 散件·${C.SLOTS[f.slot].name}` : "") + (f.mainStat ? ` · ${f.mainStat}` : "")) +
           `，按分数降序`;
         infoEl.style.display = "";

@@ -296,6 +296,10 @@ body {
 }
 .set-item:hover { background: rgba(255, 255, 255, 0.05); }
 .set-item input { accent-color: var(--brand); cursor: pointer; }
+/* 「其他 / 不判套装」特殊项：固定在滚动区外，用分隔线隔开并以次级色区分（非真实套装名） */
+.set-sep { height: 1px; margin: 8px 6px; background: var(--line-1); }
+.set-item-none { color: var(--text-2); }
+.set-item-none:hover { background: rgba(255, 255, 255, 0.05); }
 
 .filter-info {
   font-size: var(--fs-sm); color: var(--text-3); margin-bottom: 10px;
