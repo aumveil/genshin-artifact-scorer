@@ -125,26 +125,55 @@
                     + Math.max(0, rem - pending.length) * maxWExist;
 
     // 充能联动（仅按副词条充能差；主词条充能变化需手动更新 currentER）
-    const newER = (isFinite(role.currentER) ? role.currentER : 0)
+    const newER = (Number.isFinite(role.currentER) ? role.currentER : 0)
                 - ERContrib(oldArtifact) + ERContrib(newArtifact);
 
+    // 「充能已配置」＝ 需求与面板值**都**是有限数值（UI 上两者联动，同有值或同为 null）。
+    // ⚠️ 必须用 Number.isFinite：全局 isFinite(null) 返回 true（Number(null)=0），
+    //    会把「未配置充能」当成需求量 0%，进而输出虚假的「充能不足」提示（2026-09-29 修）。
+    const erConfigured = Number.isFinite(role.erRequirement) && Number.isFinite(role.currentER);
+    const erOk = !erConfigured || newER >= role.erRequirement;
+
+    // —— 充能提示（2026-09-29 二次口径变更 · 用户指示）——
+    // 提示同时看「这次替换对充能做了什么（Δ = newER − currentER）」与「替换后是否达标」：
+    //   Δ < 0 且替换后不足 → 「充能不足，缺 X%」   （lack，红）
+    //   Δ > 0 且替换后仍不足 → 「充能补足，还差 X%」（partial，黄）
+    //   Δ > 0 且替换后达标 → 「充能满足」          （met，绿）
+    //   Δ = 0 / 下降但仍达标 / 充能未配置 → 无提示
+    // 旧口径只看 newER < erRequirement，会把「正在补足充能的替换」也标成「充能不足」。
+    // Δ 取 2 位小数：抵消浮点尾差（如 180−18.1+18.1 = 180.00000000000003），
+    // 否则「充能未变化」会被误判为「增加」并给出「充能满足」。
+    const erDelta = erConfigured ? Math.round((newER - role.currentER) * 100) / 100 : 0;
     const tags = [];
-    if (isFinite(role.erRequirement) && newER < role.erRequirement) {
-      tags.push(`充能不足，缺 ${(role.erRequirement - newER).toFixed(0)}%`);
+    let erTagLevel = null;                                   // null | "lack" | "partial" | "met"（UI 配色用）
+    if (erConfigured) {
+      const gap = role.erRequirement - newER;                // > 0 表示替换后仍缺口
+      if (erDelta < 0 && gap > 0) {
+        tags.push(`充能不足，缺 ${gap.toFixed(0)}%`);
+        erTagLevel = "lack";
+      } else if (erDelta > 0 && gap > 0) {
+        tags.push(`充能补足，还差 ${gap.toFixed(0)}%`);
+        erTagLevel = "partial";
+      } else if (erDelta > 0) {
+        tags.push("充能满足");
+        erTagLevel = "met";
+      }
     }
 
     // 判定（判定与评分解耦）
     const diff = potential - curScore;
-    // 充能未配置（erRequirement 非数值）时跳过充能约束；配置了则要求替换后满足需求底线
-    const erConfigured = isFinite(role.erRequirement);
-    const erOk = !erConfigured || newER >= role.erRequirement;
+    // 充能约束（2026-09-29 口径变更 · 用户指示按方案 C 修改）：
+    //   **充能不足不再否决替换**，仅以 tags（「充能不足，缺 X%」）在 UI 上提示。
+    //   变更原因：原口径把「替换后 newER ≥ erRequirement」作为满级替换的硬条件，
+    //   而多数角色的 currentER 与 erRequirement 同值（导入占位默认 180/180，零余量），
+    //   于是任何降低充能副词条、但词条当量明显更优的替换都会被否掉
+    //   （实测：七七新羽 +1.21 词条仍被判「不建议替换（替换后充能不足）」）。
+    //   erConfigured / erOk 仍然计算并返回，供 UI 展示提示与后续扩展。
     let worthy, verdict;
     if (newArtifact.level >= C.MAX_LEVEL) {
-      // 满级：词条有提升 且 替换后充能满足需求底线（未配置充能则无充能约束）
-      worthy = (diff > C.MIN_DIFF) && erOk;
-      if (worthy) verdict = "建议替换";
-      else if (erConfigured && newER < role.erRequirement) verdict = "不建议替换（替换后充能不足）";
-      else verdict = "不建议替换（词条无提升）";
+      // 满级：只看词条是否有提升；充能不足仅提示、不否决（超额仍按算法二扣分）
+      worthy = diff > C.MIN_DIFF;
+      verdict = worthy ? "建议替换" : "不建议替换（词条无提升）";
     } else {
       // 未满级：仅判定是否值得强化
       worthy = diff >= 0;
@@ -170,22 +199,51 @@
       potentialScore: potential,
       remaining: rem,
       diffToCurrent: diff,
-      newER, tags, newPercent
+      newER, tags, newPercent,
+      erConfigured, erOk,      // 充能是否配置 / 替换后是否达标（提示用，不参与判定）
+      erDelta,                 // 面板充能变化量（newER − currentER，2 位小数）
+      erTagLevel               // 充能提示级别：null | "lack"（不足红）| "partial"（补足黄）| "met"（满足绿）
     };
   }
 
   /**
+   * 5 部位是否录全（每件都已有 set）——「角色套装」字段（role.sets）的生效前提。
+   * 未录全 → 该字段不生效，「取角色套装」一律返回空（当这个角色不存在，2026-10-09 口径）。
+   */
+  function isFullyRecorded(role) {
+    if (!role) return false;
+    const arts = role.artifacts || {};
+    return C.SLOT_KEYS.every(k => !!(arts[k] && arts[k].set));
+  }
+
+  /**
+   * 【唯一来源】角色所穿套装（2026-10-09 起由角色级字段 `role.sets` 固化，不再从圣遗物实时推导）。
+   * 语义（用户口径）：1 个 = 四件套（4+1，含 5 件同套）；2 个 = 两个两件套（2+2+1）；空 = 其他（不判套装）。
+   * 返回 [] 的两种情形等价处理：
+   *   ① 5 部位未录全 → 当这个角色不存在（不读字段、不做一致性检测、不作为判定对象与宿主）
+   *   ② `sets` 为空/非法 → 留空＝「其他」，一切套装类判定停用
+   * 为何放在 core：算法层需要它，且 data.js 依赖 core 的常量，反向引用会成环。
+   */
+  function roleSets(role) {
+    if (!isFullyRecorded(role)) return [];
+    const s = role.sets;
+    if (!Array.isArray(s)) return [];
+    return s.filter(x => typeof x === "string" && x.trim() !== "").slice(0, 2);
+  }
+
+  /** 该角色是否「判套装」（roleSets 非空）——套装类结论的总开关 */
+  function hasSetInfo(role) {
+    return roleSets(role).length > 0;
+  }
+
+  /**
    * 判断新圣遗物是否为「角色所穿套装的部件」：
-   * 其 set 与角色除散件部位外任一已穿戴部位的 set 相同。
-   * 用于情况三识别：套装件替换散件 → 替换后该部位变为套装件。
+   * 其 set ∈ 角色所穿套装集合（roleSets）。用于情况三识别：套装件替换散件 → 替换后该部位变为套装件。
+   * 2026-10-09 改：此前是遍历「除散件位外任一已穿戴部位」的 set 实时比较；现统一读角色套装字段。
    */
   function isSetPiece(art, role) {
     if (!art || !art.set) return false;
-    return C.SLOT_KEYS.some(slot => {
-      if (slot === role.looseSlot) return false;
-      const a = role.artifacts && role.artifacts[slot];
-      return a && a.set === art.set;
-    });
+    return roleSets(role).includes(art.set);
   }
 
   /**
@@ -221,14 +279,19 @@
 
   /**
    * 主入口：评估新圣遗物的所有潜在使用方式（情况一/一′ 自由件/二/三 + 汇总）
+   * 2026-10-09 口径（角色套装字段固化后）：
+   *  - 情况二/三 属「套装类结论」，需该角色**判套装**（`hasSetInfo`）才产生；
+   *    留空（「其他」）或 5 部位未录全（当这个角色不存在）→ 只剩情况一/一′（纯词条 + looseSlot 判定）。
+   *  - 情况一/一′ 判定依据是 `looseSlot` / `freeSlots`（部位级），与本字段无关，保持不变。
    * @returns {Object} {valuable, summary, results:[{case,...evaluateAgainst 结果}]}
    */
   function evaluateArtifact(newArtifact, role) {
     const results = [];
     const equipped = role.artifacts && role.artifacts[newArtifact.slot];
+    const setInfo = hasSetInfo(role);   // 该角色是否判套装（套装类结论总开关）
 
     // 情况二：作为套装件（同部位、该部位是套装件而非散件、同套装、同主词条）
-    const isSetReplace = !!(equipped && newArtifact.slot !== role.looseSlot
+    const isSetReplace = !!(setInfo && equipped && newArtifact.slot !== role.looseSlot
       && newArtifact.set === equipped.set && newArtifact.mainStat === equipped.mainStat);
 
     // 情况一/一′/三：作为散件（looseSlot 显式指定）或自由件（looseSlot 为空 → 冗余位自动识别）
@@ -392,16 +455,12 @@
   }
 
   /**
-   * 「角色装备某套装」判定（5.5 情况二/三宿主条件之一）：
-   * 非散件部位中存在 set == setName 的已穿戴件（散件位不算装备套装）。
+   * 「角色装备某套装」判定（5.5 情况二/三宿主条件之一）。
+   * 2026-10-09 改：此前遍历非散件部位找 `set === setName` 的已穿戴件；
+   * 现统一读角色套装字段（`roleSets`）——未录全 / 留空 / 字段不含该套装 → 一律 false。
    */
   function wearsSet(role, setName) {
-    if (!role) return false;
-    return C.SLOT_KEYS.some(slot => {
-      if (role.looseSlot && slot === role.looseSlot) return false;
-      const a = role.artifacts && role.artifacts[slot];
-      return !!(a && a.set === setName);
-    });
+    return roleSets(role).includes(setName);
   }
 
   /**
@@ -425,8 +484,10 @@
       r.artifacts && r.artifacts[artifact.slot] &&
       r.artifacts[artifact.slot].mainStat === artifact.mainStat
     ).map(r => ({ role: r, case: "host", kind: hostKind }));
-    if (sourceRole && artifact.slot !== sourceRole.looseSlot) {
-      hosts.unshift({ role: sourceRole, case: "self", kind: "self" });   // 情况一（套装件恒可评自己）
+    // 情况一（套装件恒可评自己）：2026-10-09 起额外要求持有者**判套装**，
+    // 否则「这件是不是套装件」无从判定 → 不产生套装类结论（留空 / 未录全角色不再原地强化自评）
+    if (sourceRole && hasSetInfo(sourceRole) && artifact.slot !== sourceRole.looseSlot) {
+      hosts.unshift({ role: sourceRole, case: "self", kind: "self" });
     }
     return hosts;
   }
@@ -474,9 +535,53 @@
   }
 
   global.App = global.App || {};
+  /**
+   * 从 5 部位实况推导「套装构成」（仅供**一次性预填**与**一致性检测**使用，不参与判定）。
+   * 归一化为与 `role.sets` 同口径：
+   *   []      = 其他（3+1+1、2+1+1+1、部位未录全等无法归入两类的）
+   *   [A]     = 四件套（4+1 或 5 件同套）
+   *   [A, B]  = 两个两件套（2+2+1）
+   */
+  function deriveSetsFromArtifacts(role) {
+    if (!isFullyRecorded(role)) return [];
+    const counts = new Map();
+    C.SLOT_KEYS.forEach(k => {
+      const s = role.artifacts[k].set;
+      counts.set(s, (counts.get(s) || 0) + 1);
+    });
+    const entries = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+    if (entries[0][1] >= 4) return [entries[0][0]];              // 4+1 / 5 件同套
+    const pairs = entries.filter(e => e[1] === 2);
+    if (pairs.length === 2) return [pairs[0][0], pairs[1][0]];    // 2+2+1
+    return [];                                                    // 其他
+  }
+
+  /** 两个套装构成是否等值（顺序无关） */
+  function sameSetComposition(a, b) {
+    const x = (a || []).slice().sort();
+    const y = (b || []).slice().sort();
+    return x.length === y.length && x.every((v, i) => v === y[i]);
+  }
+
+  /**
+   * 一致性检测（策略 b 配套）：字段声明与圣遗物实况是否不符。
+   * 仅在「5 部位录全 且 字段非空」时检查——
+   *   · 未录全 → 当这个角色不存在，跳过（用户口径 2026-10-09）
+   *   · 字段留空（「其他」）→ 无可比对，跳过
+   * @returns {{checked:boolean, mismatch:boolean, actual:string[]}}
+   */
+  function checkSetConsistency(role) {
+    const declared = roleSets(role);
+    if (!declared.length) return { checked: false, mismatch: false, actual: [] };
+    const actual = deriveSetsFromArtifacts(role);
+    return { checked: true, mismatch: !sameSetComposition(declared, actual), actual };
+  }
+
   global.App.core = {
     calcArtifactScore, calcPerfect, calcEnergyPenalty, calcCharacterScore,
     maxW, remaining, ERContrib, evaluateAgainst, evaluateArtifact, freeSlots,
-    expectedHits, calcRemodel, remodelSignature, inferInitialCount, collectRemodelCandidates, wearsSet, remodelTargets, analyzeRemodel
+    expectedHits, calcRemodel, remodelSignature, inferInitialCount, collectRemodelCandidates, wearsSet, remodelTargets, analyzeRemodel,
+    // 角色套装字段（2026-10-09）
+    isFullyRecorded, roleSets, hasSetInfo, isSetPiece, deriveSetsFromArtifacts, sameSetComposition, checkSetConsistency
   };
 })(window);

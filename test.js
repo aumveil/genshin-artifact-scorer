@@ -27,6 +27,27 @@ function assert(cond, name, extra) {
 }
 function closeTo(a, b, eps = 0.02) { return Math.abs(a - b) < eps; }
 
+/**
+ * 补满 5 部位 + 声明角色套装（2026-10-09 角色套装字段固化后）。
+ * 新口径下「套装类判定」（评估情况二/三、重塑宿主）要求：5 部位录全 **且** sets 非空
+ * ——未录全＝当这个角色不存在，留空＝「其他」不判套装。
+ * 故测试角色必须按真实数据形态补全，否则套装类断言会静默消失。
+ * @param role 角色对象（就地补 `artifacts` 缺失部位）
+ * @param set  陪衬件所用套装名（同时作为 role.sets 的唯一元素）
+ */
+function padRole(role, set) {
+  role.sets = [set];
+  const MAIN = { flower: "生命值", plume: "攻击力", sands: "攻击力百分比", goblet: "攻击力百分比", circlet: "暴击率" };
+  C.SLOT_KEYS.forEach(k => {
+    if (!role.artifacts[k]) {
+      // 陪衬件用 level:0 —— 保证满足「录全」的同时**不被 collectRemodelCandidates 收为候选**
+      // （该方法按 level >= 20 筛选，陪衬件若满级会污染候选数与去重断言）
+      role.artifacts[k] = { slot: k, set, mainStat: MAIN[k], level: 0, substats: [] };
+    }
+  });
+  return role;
+}
+
 console.log("== 算法二示例（算法文档 3.6）==");
 {
   const role = {
@@ -99,6 +120,88 @@ console.log("== 算法三示例（算法文档 4.5）==");
   assert(closeTo(newScore, 7.4), "新杯 = 7.4", newScore);
   assert(ev.results.some(r => r.case === "散件" && r.worthy), "示例A：建议替换");
   assert(ev.valuable, "示例A：有价值");
+
+  // 示例 A′：充能不足不再否决替换（2026-09-29 口径变更，用户指示按方案 C）
+  // 场景取自真实报障：七七（当前羽毛充能 18.1%）换入充能仅 11.0% 的新羽，
+  // 词条当量 4.49 → 5.70（+1.21）却被原「充能底线」硬否决。
+  {
+    const roleER = padRole({
+      looseSlot: null,
+      effectiveStats: ["暴击率", "攻击力百分比", "元素充能效率"],
+      weights: { "暴击率": 1, "攻击力百分比": 1, "元素充能效率": 1 },
+      erRequirement: 180, currentER: 180,
+      artifacts: {
+        plume: { slot: "plume", set: "千岩牢固", mainStat: "攻击力", level: 20, substats: [
+          { stat: "元素充能效率", value: 18.1, activated: true },
+          { stat: "攻击力百分比", value: 9.9, activated: true },
+          { stat: "元素精通", value: 21, activated: true },
+          { stat: "暴击伤害", value: 12.4, activated: true }] }
+      }
+    }, "千岩牢固");
+    const newPlume = { slot: "plume", set: "千岩牢固", mainStat: "攻击力", level: 20, substats: [
+      { stat: "攻击力百分比", value: 14.6, activated: true },
+      { stat: "元素充能效率", value: 11.0, activated: true },
+      { stat: "暴击率", value: 5.8, activated: true },
+      { stat: "元素精通", value: 21, activated: true }] };
+    const evER = core.evaluateArtifact(newPlume, roleER);
+    const rER = evER.results.find(r => r.case === "套装替换");
+    assert(closeTo(rER.currentScore, 4.4915), "A′：现役羽当量 4.4915", rER.currentScore);
+    assert(closeTo(rER.potentialScore, 5.6967), "A′：新羽当量 5.6967", rER.potentialScore);
+    assert(closeTo(rER.diffToCurrent, 1.205), "A′：词条差 +1.205", rER.diffToCurrent);
+    assert(rER.worthy === true, "A′：充能不足不再否决 → worthy = true");
+    assert(rER.verdict === "建议替换", "A′：verdict = 建议替换", rER.verdict);
+    assert(closeTo(rER.newER, 172.9), "A′：替换后充能 172.9%", rER.newER);
+    assert(rER.erOk === false, "A′：erOk = false（仅提示用，不参与判定）");
+    assert(rER.tags.length === 1 && /充能不足/.test(rER.tags[0]), "A′：仍输出「充能不足」提示标签", rER.tags);
+    assert(evER.valuable === true, "A′：整体判定为有价值");
+    // 充能未配置（erRequirement 非数值）→ 无约束、无提示（原有口径不变）
+    const roleNoER = Object.assign({}, roleER, { erRequirement: null, currentER: null });
+    const rNoER = core.evaluateArtifact(newPlume, roleNoER).results[0];
+    assert(rNoER.erOk === true && rNoER.tags.length === 0, "A′：未配置充能 → 无约束无提示");
+  }
+
+  // 充能提示四情况（2026-09-29 二次口径变更）：提示同时看「替换带来的变化 Δ」与「替换后是否达标」
+  {
+    const mkArt = er => ({ slot: "plume", set: "千岩牢固", mainStat: "攻击力", level: 20, substats: [
+      { stat: "元素充能效率", value: er, activated: true },
+      { stat: "攻击力百分比", value: 9.9, activated: true }] });
+    const run = (cur, oldER, newERv, req = 180) => {
+      const role = padRole({
+        looseSlot: null,
+        effectiveStats: ["攻击力百分比", "元素充能效率"],
+        weights: { "攻击力百分比": 1, "元素充能效率": 1 },
+        erRequirement: req, currentER: cur,
+        artifacts: { plume: mkArt(oldER) }
+      }, "千岩牢固");
+      return core.evaluateArtifact(mkArt(newERv), role).results.find(r => r.case === "套装替换");
+    };
+
+    // 1. Δ < 0 且替换后不足 → 充能不足（lack，红）
+    const c1 = run(180, 18.1, 11.0);
+    assert(closeTo(c1.erDelta, -7.1, 1e-6) && c1.tags[0] === "充能不足，缺 7%" && c1.erTagLevel === "lack",
+      "①Δ<0 且不足 →「充能不足，缺 7%」(lack)", JSON.stringify([c1.erDelta, c1.tags, c1.erTagLevel]));
+    // 2. Δ > 0 但替换后仍不足 → 充能补足（partial，黄）
+    const c2 = run(170, 6.5, 11.5);
+    assert(closeTo(c2.erDelta, 5, 1e-6) && closeTo(c2.newER, 175, 1e-6)
+      && c2.tags[0] === "充能补足，还差 5%" && c2.erTagLevel === "partial",
+      "②Δ>0 且仍不足 →「充能补足，还差 5%」(partial)", JSON.stringify([c2.erDelta, c2.tags, c2.erTagLevel]));
+    // 3. Δ > 0 且替换后达标 → 充能满足（met，绿）
+    const c3 = run(170, 6.5, 18.1);
+    assert(closeTo(c3.erDelta, 11.6, 1e-6) && c3.tags[0] === "充能满足" && c3.erTagLevel === "met",
+      "③Δ>0 且达标 →「充能满足」(met)", JSON.stringify([c3.erDelta, c3.tags, c3.erTagLevel]));
+    // 4. Δ = 0（替换前也不足）→ 无提示
+    const c4 = run(170, 6.5, 6.5);
+    assert(closeTo(c4.erDelta, 0, 1e-6) && c4.tags.length === 0 && c4.erTagLevel === null,
+      "④Δ=0 → 无提示（即便角色当前不足）", JSON.stringify([c4.erDelta, c4.tags]));
+    // 5. Δ < 0 但替换后仍达标 → 无提示（用户 2026-09-29 选定）
+    const c5 = run(190, 18.1, 11.0);
+    assert(closeTo(c5.newER, 182.9, 1e-6) && c5.tags.length === 0 && c5.erTagLevel === null,
+      "⑤Δ<0 但仍达标 → 无提示", JSON.stringify([c5.newER, c5.tags]));
+    // 6. 浮点尾差防护：充能贡献相同的替换（18.1 → 18.1）不得判成「增加 → 充能满足」
+    const c6 = run(180, 18.1, 18.1);
+    assert(closeTo(c6.erDelta, 0, 1e-9) && c6.tags.length === 0,
+      "⑥充能贡献相同 → Δ=0、无提示（浮点尾差已消除）", JSON.stringify([c6.erDelta, c6.tags]));
+  }
 
   // 示例 B：未满级花强化（level=4 剩 4 次）
   const roleB = {
@@ -250,11 +353,12 @@ console.log("== 算法四：重塑价值评估（算法文档 五）==");
   assert(core.calcRemodel(junk, roleA, 2) === null, "无有效词条 → null");
 
   // —— 候选扫描去重 + 三情况归属 + 统一 RV 口径 + 互斥取最优 ——
-  const mkRole = (name, art, loose) => ({
+  // 2026-10-09：套装类判定要求 5 部位录全 + sets 非空，故用 padRole 补全陪衬件
+  const mkRole = (name, art, loose) => padRole({
     id: name, name, looseSlot: loose || null,
     effectiveStats: roleA.effectiveStats, weights: roleA.weights,
     artifacts: { flower: art || null, plume: null, sands: null, goblet: null, circlet: null }
-  });
+  }, "X");
   const roleJia = mkRole("甲角色", 甲);
   const roleYi = mkRole("乙角色", 乙);
   const roleDup = mkRole("重复-乙", JSON.parse(JSON.stringify(乙)));
@@ -283,12 +387,12 @@ console.log("== 算法四：重塑价值评估（算法文档 五）==");
   const junkB = { slot: "flower", set: "X", mainStat: "生命值", level: 20, substats: [
     { stat: "防御力", value: 23, activated: true }, { stat: "生命值百分比", value: 5.8, activated: true },
     { stat: "防御力百分比", value: 7.3, activated: true }, { stat: "生命值", value: 299, activated: true }] };
-  const roleB = {
+  const roleB = padRole({
     id: "B", name: "爆伤偏置", looseSlot: null,
     effectiveStats: roleA.effectiveStats,
     weights: { "暴击率": 0.6, "暴击伤害": 1.5, "攻击力百分比": 0.5, "元素精通": 0.5 },
     artifacts: { flower: junkB, plume: null, sands: null, goblet: null, circlet: null }
-  };
+  }, "X");
   const candYi = cands.find(c => c.artifact === 乙);
   const rowsB = core.analyzeRemodel([candYi], [roleYi, roleB], 2);
   assert(rowsB[0].best.case === "host" && rowsB[0].best.role.name === "爆伤偏置",
@@ -297,20 +401,25 @@ console.log("== 算法四：重塑价值评估（算法文档 五）==");
     "扣除口径：RV = 6.0310 − 0（宿主现有件全无效 → baseline 0）", rowsB[0].best.r.rv);
   assert(closeTo(rowsB[0].best.r.currentScore, 0, 1e-9), "转移现状 = 宿主现有件分（0）", rowsB[0].best.r.currentScore);
   // 宿主现有件有分 → 必须扣除（与算法三替换口径一致；不扣除会误报 6.0310）
-  const roleB2 = Object.assign({}, roleB, { id: "B2", name: "爆伤偏置2", artifacts: { flower: {
+  const roleB2 = padRole(Object.assign({}, roleB, { id: "B2", name: "爆伤偏置2", artifacts: { flower: {
     slot: "flower", set: "X", mainStat: "生命值", level: 20,
     substats: [{ stat: "暴击率", value: 7.8, activated: true }, { stat: "暴击伤害", value: 7.8, activated: true }]
-  }, plume: null, sands: null, goblet: null, circlet: null } });
+  } } }), "X");
   const rowsB2 = core.analyzeRemodel([candYi], [roleYi, roleB2], 2);
   assert(closeTo(rowsB2[0].best.r.rv, 6.031015625 - 2.7, 1e-3),
     "扣除口径：宿主现有件 2.7 分 → RV = 3.3310", rowsB2[0].best.r.rv);
 
   // 情况三：散件不评自身，仅评装备其所属套装的宿主
+  // 2026-10-09：宿主「是否装备该套装」改读角色套装字段 → 宿主须显式声明 sets: ["绝缘"]
   const looseFlower = { slot: "flower", set: "绝缘", mainStat: "生命值", level: 20, substats: [
     { stat: "暴击率", value: 3.9, activated: true }, { stat: "暴击伤害", value: 7.8, activated: true }] };
   const roleC = mkRole("散件持有者", looseFlower, "flower");
-  const roleD = mkRole("绝缘宿主", { slot: "flower", set: "绝缘", mainStat: "生命值", level: 20,
-    substats: [{ stat: "暴击率", value: 3.9, activated: true }] });
+  const roleD = padRole({
+    id: "绝缘宿主", name: "绝缘宿主", looseSlot: null,
+    effectiveStats: roleA.effectiveStats, weights: roleA.weights,
+    artifacts: { flower: { slot: "flower", set: "绝缘", mainStat: "生命值", level: 20,
+      substats: [{ stat: "暴击率", value: 3.9, activated: true }] } }
+  }, "绝缘");
   const rows3 = core.analyzeRemodel(
     [{ artifact: looseFlower, sourceRole: roleC, signature: core.remodelSignature(looseFlower) }],
     [roleC, roleD], 2);
@@ -426,12 +535,12 @@ console.log("== 算法四补充：3/4 初始自动推断（inferInitialCount，�
   assert(core.inferInitialCount(artPend) === 4, "待激活词条不参与推断 → 4", core.inferInitialCount(artPend));
 
   // 集成：analyzeRemodel 的 initialCountOf 接入推断 → 行内 n 与显式传 3 一致
-  const roleInf = {
+  const roleInf = padRole({
     id: "inf", name: "推断角色", looseSlot: null,
     effectiveStats: ["暴击率", "暴击伤害", "攻击力百分比"],
     weights: { "暴击率": 1.0, "暴击伤害": 1.0, "攻击力百分比": 0.8 },
     artifacts: { flower: art3, plume: null, sands: null, goblet: null, circlet: null }
-  };
+  }, "X");
   const candInf = { artifact: art3, sourceRole: roleInf, signature: core.remodelSignature(art3) };
   const rowsInf = core.analyzeRemodel([candInf], [roleInf], 2, c => core.inferInitialCount(c.artifact));
   assert(rowsInf.length === 1 && rowsInf[0].best.r.n === 4,
@@ -602,7 +711,8 @@ console.log("== 主词条匹配校验 ==");
 console.log("== 情况二只对非散件部位适用 ==");
 {
   // looseSlot=goblet，角色当前杯是散件（同名套装+同主词条不应触发情况二）
-  const role = {
+  // 2026-10-09：套装类判定改读角色套装字段，且要求 5 部位录全 → 用 padRole 补满并声明主套
+  const role = padRole({
     looseSlot: "goblet",
     effectiveStats: ["暴击率","暴击伤害","攻击力百分比"],
     weights: { "暴击率":1.0, "暴击伤害":1.0, "攻击力百分比":0.8 },
@@ -610,7 +720,7 @@ console.log("== 情况二只对非散件部位适用 ==");
     artifacts: { goblet: { slot:"goblet", set:"绝缘之旗印", mainStat:"火元素伤害加成", level:20, substats:[
       {stat:"暴击率",value:3.9,activated:true},{stat:"暴击伤害",value:7.8,activated:true},
       {stat:"攻击力百分比",value:5.8,activated:true},{stat:"元素精通",value:23,activated:true}]} }
-  };
+  }, "炽烈的炎之魔女");   // 主套≠散件套（散件按定义不属于角色所穿套装）
   const newCup = { slot:"goblet", set:"绝缘之旗印", mainStat:"火元素伤害加成", level:20, substats:[
     {stat:"暴击率",value:7.8,activated:true},{stat:"暴击伤害",value:15.6,activated:true},
     {stat:"攻击力百分比",value:11.6,activated:true},{stat:"元素精通",value:23,activated:true}] };
@@ -636,6 +746,7 @@ console.log("== 情况三：套装件替换散件 ==");
   // 角色：4 件魔女（花/羽/沙/头）+ 散件杯（乐团火伤杯）
   const role = {
     looseSlot: "goblet",
+    sets: ["炽烈的炎之魔女"],   // 角色套装字段（2026-10-09）：套装类判定读它
     effectiveStats: ["暴击率","暴击伤害","攻击力百分比","元素精通"],
     weights: { "暴击率":1.0, "暴击伤害":1.0, "攻击力百分比":0.8, "元素精通":0.6 },
     erRequirement: 180, currentER: 180,
@@ -694,13 +805,16 @@ console.log("== 方案 A：无散件（looseSlot=null）自由位评估 ==");
   function mkRole(looseSlot, setOf) {
     const arts = {};
     Object.keys(MAIN).forEach(slot => { arts[slot] = mkArt(slot, setOf(slot), MAIN[slot], 20, subs); });
-    return {
+    const role = {
       looseSlot,
       effectiveStats: ["暴击率", "暴击伤害", "攻击力百分比", "元素精通"],
       weights: { "暴击率": 1.0, "暴击伤害": 1.0, "攻击力百分比": 0.8, "元素精通": 0.6 },
       erRequirement: 180, currentER: 180,
       artifacts: arts
     };
+    // 角色套装字段（2026-10-09）：套装类判定（情况二/三）读它 → 按实况推导，与真实数据同一来源
+    role.sets = core.deriveSetsFromArtifacts(role);
+    return role;
   }
   const mag = () => "炽烈的炎之魔女";
   const role5 = mkRole(null, mag);                       // 5 件全魔女（无散件）
@@ -882,6 +996,38 @@ console.log("== storage.migrate 保留 customSets（自定义套装持久化回�
   const df = dirty.roles[0].artifacts.flower;
   assert(!("note" in df) && !("mainValue" in df), "migrate 剥离废弃字段 note / mainValue", Object.keys(df).join(","));
   assert(df.mainStat === "生命值" && df.level === 20 && df.set === "X", "剥离废弃字段不影响其余字段", JSON.stringify(df));
+
+  // element 自动补全（2026-10-09）：缺失/空串时按 CHARACTER_ELEMENT_HINTS 补，已有值一律不覆盖
+  const eleStore = storage.migrate({
+    version: 1, exportedAt: null,
+    roles: [
+      { id: "e1", name: "胡桃", element: "", artifacts: {} },             // 空串 → 补
+      { id: "e2", name: "钟离", artifacts: {} },                          // 字段缺失 → 补
+      { id: "e3", name: "七七", element: "冰", artifacts: {} },           // 已有值 → 保持
+      { id: "e4", name: "叶洛亚", element: "岩", artifacts: {} },         // 手工值（表内新增）→ 保持
+      { id: "e5", name: "查无此人", element: "火", artifacts: {} },        // 表外但有值 → 保持
+      { id: "e6", name: "另一个查无此人", artifacts: {} }                  // 表外且无值 → 保持为空
+    ],
+    customSets: []
+  });
+  const eleOf = n => (eleStore.roles.find(r => r.name === n) || {}).element;
+  assert(eleOf("胡桃") === "火", "element 为空串 → 按映射表补全", String(eleOf("胡桃")));
+  assert(eleOf("钟离") === "岩", "element 字段缺失 → 按映射表补全", String(eleOf("钟离")));
+  assert(eleOf("七七") === "冰", "已有 element → 保持不变");
+  assert(eleOf("叶洛亚") === "岩", "映射表新增角色 → 保持原值");
+  assert(eleOf("查无此人") === "火", "映射表未收录但有值 → 保持原值");
+  assert(!eleOf("另一个查无此人"), "映射表未收录且无值 → 保持为空（不臆造元素）");
+  // 映射表补齐 11 位新角色（2026-10-09）：逐条核对，避免只抽查漏掉 typo
+  const ADDED = { "叶洛亚": "岩", "法尔伽": "风", "莉奈娅": "岩", "尼可": "火", "布伦妮": "风",
+    "洛恩": "冰", "桑多涅": "冰", "奥黛塔": "冰", "薇斯纳": "风", "沃雅妮莎": "水", "兹白": "岩" };
+  const badHints = Object.keys(ADDED).filter(n => C.CHARACTER_ELEMENT_HINTS[n] !== ADDED[n]);
+  assert(badHints.length === 0, "映射表补齐 11 位新角色（逐条核对）", badHints.join(","));
+  assert(Object.keys(C.CHARACTER_ELEMENT_HINTS).length === 66 + 11, "映射表条目数 = 66 + 11 新增",
+    String(Object.keys(C.CHARACTER_ELEMENT_HINTS).length));
+
+  // 导入路径同样补全：io.importFile 在转换后调用 sanitizeStore
+  const imp = storage.sanitizeStore({ roles: [{ id: "i1", name: "温迪", artifacts: {} }], customSets: [] });
+  assert(imp.roles[0].element === "风", "导入路径 sanitizeStore 同样补全 element", String(imp.roles[0].element));
 }
 
 console.log("== storage 筛选状态持久化（刷新/重开恢复）==");
@@ -931,6 +1077,217 @@ console.log("== storage 筛选状态持久化（刷新/重开恢复）==");
   // —— 损坏数据 ——
   global.localStorage.setItem(storage.FILTER_KEY, "{bad json");
   assert(storage.loadFilter() === null, "损坏 JSON → loadFilter 返回 null");
+}
+
+console.log("== store.replaceArtifact 充能联动（2026-09-29）==");
+{
+  if (typeof global.alert === "undefined") global.alert = () => {};   // Node 无 alert
+  require("./js/store.js");
+  const S = global.App.store;
+  const mkPlume = er => ({ slot: "plume", set: "千岩牢固", mainStat: "攻击力", level: 20, substats: [
+    { stat: "元素充能效率", value: er, activated: true },
+    { stat: "攻击力百分比", value: 9.9, activated: true },
+    { stat: "元素精通", value: 21, activated: true },
+    { stat: "暴击伤害", value: 12.4, activated: true }] });
+
+  const role = S.newRole("测试-充能联动");
+  role.effectiveStats = ["暴击率", "攻击力百分比", "元素充能效率"];
+  role.weights = { "暴击率": 1, "攻击力百分比": 1, "元素充能效率": 1 };
+  role.erRequirement = 180; role.currentER = 180;
+  role.artifacts.plume = mkPlume(18.1);
+  S.updateRole(role);
+
+  const res = S.replaceArtifact(role.id, "plume", mkPlume(11.0));
+  assert(res && res.ok === true, "替换返回 ok", JSON.stringify(res));
+  assert(closeTo(res.erDelta, -7.1, 1e-6) && closeTo(res.erFrom, 180, 1e-6) && closeTo(res.erTo, 172.9, 1e-6),
+    "充能贡献差 −7.1 → 面板 180 → 172.9", JSON.stringify(res));
+  assert(closeTo(role.currentER, 172.9, 1e-6), "面板充能已写回角色", role.currentER);
+
+  // 充能未配置（null）→ 不联动，保持 null
+  const roleNull = S.newRole("测试-未配置充能");
+  roleNull.erRequirement = null; roleNull.currentER = null;
+  roleNull.artifacts.plume = mkPlume(18.1);
+  S.updateRole(roleNull);
+  const resNull = S.replaceArtifact(roleNull.id, "plume", mkPlume(11.0));
+  assert(resNull && resNull.erFrom === null && resNull.erTo === null && roleNull.currentER === null,
+    "未配置充能 → 不联动（保持 null）", JSON.stringify(resNull));
+
+  // 充能贡献无差异 → 不联动、面板值不变
+  const resSame = S.replaceArtifact(role.id, "plume", mkPlume(11.0));
+  assert(resSame && resSame.erFrom === null && closeTo(role.currentER, 172.9, 1e-6),
+    "充能贡献无变化 → 不联动、面板不变", JSON.stringify(resSame));
+
+  // 主词条变化（沙漏 攻击% → 充能）→ 报告 erMainStatTouched（主词条充能不自动联动，由 UI 提示手动核对）
+  const roleSands = S.newRole("测试-主词条变化");
+  roleSands.effectiveStats = ["元素充能效率"];
+  roleSands.weights = { "元素充能效率": 1 };
+  roleSands.erRequirement = 180; roleSands.currentER = 180;
+  roleSands.artifacts.sands = { slot: "sands", set: "绝缘之旗印", mainStat: "攻击力百分比", level: 20, substats: [
+    { stat: "元素充能效率", value: 6.5, activated: true }] };
+  S.updateRole(roleSands);
+  const resMain = S.replaceArtifact(roleSands.id, "sands", { slot: "sands", set: "绝缘之旗印", mainStat: "元素充能效率", level: 20, substats: [
+    { stat: "元素充能效率", value: 6.5, activated: true }] });
+  assert(resMain && resMain.mainStatChanged === true && resMain.erMainStatTouched === true,
+    "主词条变更且涉及充能 → erMainStatTouched = true", JSON.stringify(resMain));
+  assert(closeTo(roleSands.currentER, 180, 1e-6), "主词条充能不自动联动（面板保持 180，待用户手动核对）", roleSands.currentER);
+}
+
+console.log("== 角色套装字段（2026-10-09 固化：sets / roleSets / 一致性检测 / 预算）==");
+{
+  const MAIN = { flower: "生命值", plume: "攻击力", sands: "攻击力百分比", goblet: "火元素伤害加成", circlet: "暴击率" };
+  const art = (slot, set) => ({ slot, set, mainStat: MAIN[slot], level: 20, substats: [] });
+  /** 造角色：slotSets 为 5 部位的套装名（null = 该部位未录入） */
+  const mkR = (slotSets, sets) => {
+    const artifacts = {};
+    C.SLOT_KEYS.forEach(k => { if (slotSets[k]) artifacts[k] = art(k, slotSets[k]); });
+    return { id: "s", name: "套装测试", sets, looseSlot: "goblet", artifacts };
+  };
+
+  // —— roleSets 门禁 ——
+  const full4 = mkR({ flower: "A", plume: "A", sands: "A", goblet: "B", circlet: "A" }, ["A"]);
+  const setAll = s => mkR({ flower: "A", plume: "A", sands: "A", goblet: "B", circlet: "A" }, s);
+  assert(core.isFullyRecorded(full4) === true, "5 部位录全 → isFullyRecorded = true");
+  assert(core.roleSets(full4).join() === "A" && core.hasSetInfo(full4) === true, "录全 + sets=[A] → roleSets=[A]");
+  assert(core.roleSets(mkR({ flower: "A", plume: "A", sands: "A", goblet: "B", circlet: null }, ["A"])).length === 0,
+    "未录全（缺 1 部位）→ roleSets 为空（当这个角色不存在）");
+  assert(core.roleSets(setAll([])).length === 0, "sets 为空数组 → roleSets 为空（「其他」不判套装）");
+  assert(core.roleSets(setAll(undefined)).length === 0, "sets 字段缺失 → 视为未判套装（不报错）");
+  assert(core.roleSets(setAll(["A", "B", "C"])).length === 2, "sets 超长 → 截断到 2 个（防御性）");
+  assert(core.roleSets(setAll(["A", "", null])).length === 1, "sets 中的空值 / 非字符串被过滤");
+
+  // —— isSetPiece / wearsSet 读字段（不再遍历圣遗物）——
+  assert(core.isSetPiece({ set: "A" }, full4) === true, "isSetPiece：set ∈ 角色套装 → true");
+  assert(core.isSetPiece({ set: "B" }, full4) === false,
+    "isSetPiece：散件位的套装不计入角色所穿套装 → false（旧实现靠排除 looseSlot 达成的同口径）");
+  const looseSet = mkR({ flower: "A", plume: "A", sands: "A", goblet: "A", circlet: "A" }, ["A"]);
+  looseSet.looseSlot = null;
+  assert(core.wearsSet(looseSet, "A") === true, "wearsSet：字段含该套装 → true");
+  looseSet.sets = [];
+  assert(core.wearsSet(looseSet, "A") === false, "wearsSet：字段留空 → false（即使 5 件全为 A）");
+
+  // —— 留空 / 未录全 → 情况二停用，只剩情况一 ——
+  const base = {
+    looseSlot: "goblet", effectiveStats: ["暴击率"], weights: { "暴击率": 1 },
+    erRequirement: null, currentER: null,
+    artifacts: (() => {
+      const a = {};
+      C.SLOT_KEYS.forEach(k => { a[k] = art(k, "A"); });
+      a.goblet = { slot: "goblet", set: "A", mainStat: "火元素伤害加成", level: 20, substats: [
+        { stat: "暴击率", value: 3.9, activated: true }] };
+      return a;
+    })()
+  };
+  const newGob = { slot: "goblet", set: "A", mainStat: "火元素伤害加成", level: 20, substats: [
+    { stat: "暴击率", value: 7.8, activated: true }] };
+  const mkWithSets = sets => Object.assign(JSON.parse(JSON.stringify(base)), { sets });
+  assert(!core.evaluateArtifact(newGob, mkWithSets(["A"])).results.some(r => r.case === "套装替换"),
+    "散件位 → 情况二恒不适用（原口径保留）");
+  const rNoSets = core.evaluateArtifact(newGob, mkWithSets([]));
+  assert(!rNoSets.results.some(r => r.case === "套装替换"),
+    "留空（「其他」）→ 情况二停用（用户口径 1：不保留）");
+  assert(rNoSets.results.some(r => r.case === "散件"), "留空 → 情况一保留（纯词条 + looseSlot 判定）");
+  // 未录全 → 当这个角色不存在：情况二/三 均不产生（即使字段已声明）
+  const partial = JSON.parse(JSON.stringify(base));
+  delete partial.artifacts.circlet;
+  partial.sets = ["A"];
+  const rPartial = core.evaluateArtifact(newGob, partial);
+  assert(!rPartial.results.some(r => r.case === "套装替换" || r.isSetSwap),
+    "未录全 → 当这个角色不存在：无任何套装类结论", JSON.stringify(rPartial.results.map(r => r.case)));
+  assert(rPartial.results.some(r => r.case === "散件"), "未录全 → 情况一（非套装类）仍可用");
+
+  // —— 2+2+1：声明 looseSlot 后可评估（用户口径 2）——
+  const r221 = mkR({ flower: "A", plume: "A", sands: "B", goblet: "C", circlet: "B" }, ["A", "B"]);
+  assert(core.deriveSetsFromArtifacts(r221).join() + "" === "A,B", "2+2+1 实况 → 推导 [A,B]");
+  assert(core.freeSlots(r221).join() === "goblet",
+    "2+2+1 + 显式 looseSlot → 自由位 = 散件位（不再恒空 → 可评估）");
+  const new221 = { slot: "goblet", set: "A", mainStat: "火元素伤害加成", level: 20, substats: [
+    { stat: "暴击率", value: 7.8, activated: true }] };
+  r221.artifacts.goblet.substats = [{ stat: "暴击率", value: 3.9, activated: true }];
+  assert(core.evaluateArtifact(new221, r221).results.length > 0, "2+2+1 → 有可评估情况（接受该行为放大）");
+
+  // —— deriveSetsFromArtifacts ——
+  assert(core.deriveSetsFromArtifacts(mkR({ flower: "A", plume: "A", sands: "A", goblet: "B", circlet: "A" }, [])).join() === "A",
+    "4+1 → 推导 [A]");
+  assert(core.deriveSetsFromArtifacts(mkR({ flower: "A", plume: "A", sands: "A", goblet: "A", circlet: "A" }, [])).join() === "A",
+    "5 件同套 → 推导 [A]（归四件套类）");
+  assert(core.deriveSetsFromArtifacts(mkR({ flower: "A", plume: "A", sands: "B", goblet: "B", circlet: "C" }, [])).join() === "A,B",
+    "2+2+1 → 推导 [A,B]");
+  assert(core.deriveSetsFromArtifacts(mkR({ flower: "A", plume: "A", sands: "A", goblet: "B", circlet: "C" }, [])).length === 0,
+    "3+1+1 → 推导空（归「其他」）");
+  assert(core.deriveSetsFromArtifacts(mkR({ flower: "A", plume: null, sands: "A", goblet: "A", circlet: "A" }, [])).length === 0,
+    "部位未录全 → 推导空");
+
+  // —— 一致性检测（策略 b 配套）——
+  const c1 = core.checkSetConsistency(mkR({ flower: "A", plume: "A", sands: "A", goblet: "B", circlet: "A" }, ["A"]));
+  assert(c1.checked === true && c1.mismatch === false, "字段与实况一致 → 不告警");
+  const c2 = core.checkSetConsistency(mkR({ flower: "A", plume: "A", sands: "A", goblet: "B", circlet: "A" }, ["X"]));
+  assert(c2.checked === true && c2.mismatch === true && c2.actual.join() === "A",
+    "字段与实况不符 → 告警并给出实况值", JSON.stringify(c2));
+  assert(core.checkSetConsistency(mkR({ flower: "A", plume: "A", sands: "A", goblet: "B", circlet: "A" }, [])).checked === false,
+    "字段留空（「其他」）→ 跳过检测");
+  assert(core.checkSetConsistency(mkR({ flower: "A", plume: null, sands: "A", goblet: "A", circlet: "A" }, ["A"])).checked === false,
+    "未录全 → 跳过检测（当这个角色不存在）");
+  // 顺序无关
+  assert(core.sameSetComposition(["A", "B"], ["B", "A"]) === true, "套装构成比较与顺序无关");
+
+  // —— 校验（data.validateRoleConfig）——
+  const vOk = data.validateRoleConfig({ name: "X", sets: ["A", "B"], looseSlot: null, effectiveStats: ["暴击率"], weights: { "暴击率": 1 }, artifacts: {} });
+  assert(!vOk.hard.some(e => e.field === "sets"), "sets 为长度 ≤2 的字符串数组 → 通过校验");
+  const vNotArr = data.validateRoleConfig({ name: "X", sets: "A", looseSlot: null, effectiveStats: ["暴击率"], weights: { "暴击率": 1 }, artifacts: {} });
+  assert(vNotArr.hard.some(e => e.field === "sets"), "sets 非数组 → 硬错误");
+  const vTooMany = data.validateRoleConfig({ name: "X", sets: ["A", "B", "C"], looseSlot: null, effectiveStats: ["暴击率"], weights: { "暴击率": 1 }, artifacts: {} });
+  assert(vTooMany.hard.some(e => e.field === "sets"), "sets 超过 2 个 → 硬错误");
+  const vEmpty = data.validateRoleConfig({ name: "X", sets: [""], looseSlot: null, effectiveStats: ["暴击率"], weights: { "暴击率": 1 }, artifacts: {} });
+  assert(vEmpty.hard.some(e => e.field === "sets"), "sets 含空字符串 → 硬错误");
+  const vMissing = data.validateRoleConfig({ name: "X", looseSlot: null, effectiveStats: ["暴击率"], weights: { "暴击率": 1 }, artifacts: {} });
+  assert(!vMissing.hard.some(e => e.field === "sets"), "sets 字段缺失 → 不报错（向后兼容）");
+}
+
+console.log("== 角色套装字段：迁移预算（一次性预填）==");
+{
+  const storage = global.App.storage;
+  const art = (slot, set) => ({ slot, set, mainStat: { flower: "生命值", plume: "攻击力", sands: "攻击力百分比", goblet: "火元素伤害加成", circlet: "暴击率" }[slot], level: 20, substats: [] });
+  const mkArtifacts = slotSets => {
+    const a = {};
+    C.SLOT_KEYS.forEach(k => { if (slotSets[k]) a[k] = art(k, slotSets[k]); });
+    return a;
+  };
+  // 旧数据（无 sets 键）→ 按实况预填
+  const old = storage.migrate({
+    version: 1, exportedAt: null,
+    roles: [
+      { id: "p1", name: "四件套", artifacts: mkArtifacts({ flower: "A", plume: "A", sands: "A", goblet: "B", circlet: "A" }) },
+      { id: "p2", name: "两两件套", artifacts: mkArtifacts({ flower: "A", plume: "A", sands: "B", goblet: "B", circlet: "C" }) },
+      { id: "p3", name: "三一一", artifacts: mkArtifacts({ flower: "A", plume: "A", sands: "A", goblet: "B", circlet: "C" }) },
+      { id: "p4", name: "未录全", artifacts: mkArtifacts({ flower: "A", plume: "A", sands: "A", goblet: "B", circlet: null }) }
+    ],
+    customSets: []
+  });
+  const setsOf = n => old.roles.find(r => r.name === n).sets;
+  assert(setsOf("四件套").join() === "A", "预填：4+1 → [主套]");
+  assert(setsOf("两两件套").join() === "A,B", "预填：2+2+1 → [A,B]");
+  assert(Array.isArray(setsOf("三一一")) && setsOf("三一一").length === 0, "预填：3+1+1 → 空（「其他」）");
+  assert(Array.isArray(setsOf("未录全")) && setsOf("未录全").length === 0, "预填：部位未录全 → 空");
+  assert(old.roles.every(r => Array.isArray(r.sets)), "预填后所有角色都带上 sets 数组（字段形态统一）");
+
+  // 已声明（含用户主动留空）→ 不覆盖：键存在即视为已迁移
+  const kept = storage.migrate({
+    version: 1, exportedAt: null,
+    roles: [
+      { id: "k1", name: "主动留空", sets: [], artifacts: mkArtifacts({ flower: "A", plume: "A", sands: "A", goblet: "B", circlet: "A" }) },
+      { id: "k2", name: "手填", sets: ["Z"], artifacts: mkArtifacts({ flower: "A", plume: "A", sands: "A", goblet: "B", circlet: "A" }) }
+    ],
+    customSets: []
+  });
+  assert(kept.roles.find(r => r.name === "主动留空").sets.length === 0,
+    "用户主动留空（sets: []）→ 预填不再填上（键存在即已迁移）");
+  assert(kept.roles.find(r => r.name === "手填").sets.join() === "Z", "已声明的手工值不被实况覆盖（策略 b）");
+
+  // 新建角色带 sets: []
+  const store = require("./js/store.js") && global.App.store;
+  const nr = global.App.store.newRole("套装字段-新建");
+  assert(Array.isArray(nr.sets) && nr.sets.length === 0, "newRole 初始化 sets: []");
+  global.App.store.deleteRole(nr.id);
 }
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);

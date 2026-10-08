@@ -192,6 +192,9 @@
         return {
           id: global.App.store ? global.App.store.genId() : ("imp_role_" + name),
           name,
+          // ⚠️ 刻意**不**写 element / sets 字段：两者都由 storage.sanitizeStore 在导入时补
+          //    （element 按 CHARACTER_ELEMENT_HINTS 映射；sets 按 5 部位实况推导）。
+          //    若在此写死 `sets: []`，会被「键不存在才预填」的判据视为「已声明」→ 反而阻止推导。
           looseSlot: inferLooseSlot(arts),   // 依据套装分布推断散件（4+1 异套件等），无则 null（可手动设置）
           effectiveStats: [],           // 外部格式无配置，需手动补充
           weights: {},

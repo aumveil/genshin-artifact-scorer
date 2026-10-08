@@ -123,6 +123,16 @@
     if (role.looseSlot != null && role.looseSlot !== "" && !C.SLOT_KEYS.includes(role.looseSlot)) {
       hard.push({ field: "looseSlot", msg: "散件部位不合法" });
     }
+    // 角色所穿套装（2026-10-09）：0 个 = 其他（不判套装）、1 个 = 四件套（4+1）、2 个 = 两个两件套（2+2+1）
+    // 套装名合法性不在此校验（与圣遗物 set 同口径，允许自定义套装名），只校验形态
+    const sets = role.sets;
+    if (sets !== undefined && !Array.isArray(sets)) {
+      hard.push({ field: "sets", msg: "套装字段必须是数组" });
+    } else if (Array.isArray(sets)) {
+      const bad = sets.filter(s => typeof s !== "string" || !s.trim());
+      if (bad.length) hard.push({ field: "sets", msg: "套装名必须是非空字符串" });
+      if (sets.length > 2) hard.push({ field: "sets", msg: "套装最多两个（四件套 1 个 / 两个两件套 2 个）" });
+    }
     // 5 部位（软性：允许未录全）
     const arts = role.artifacts || {};
     const missing = C.SLOT_KEYS.filter(k => !arts[k] || !arts[k].mainStat);

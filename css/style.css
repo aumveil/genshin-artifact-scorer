@@ -272,7 +272,7 @@ body {
 .filter-bar select:hover { border-color: var(--line-2); }
 .filter-bar select:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 
-/* 套装筛选：下拉多选面板（checkbox 列表；≥2 件固定视为套装） */
+/* 套装筛选：下拉多选面板（checkbox 列表；判定读角色套装字段 role.sets） */
 .set-filter { position: relative; }
 .set-filter .set-btn { white-space: nowrap; padding: 0 11px; }
 .set-dropdown {
@@ -752,6 +752,12 @@ body {
   color: var(--yellow); padding: 9px 13px; border-radius: var(--r-sm);
   font-size: var(--fs-md); margin-bottom: 12px; line-height: 1.6;
 }
+/* 套装字段与实况不一致提示条（详情页）：文案 + 右侧「按实况更新」按钮 */
+.warn.set-mismatch {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.warn.set-mismatch .btn { flex: 0 0 auto; }
 .err-box {
   background: rgba(229, 85, 77, 0.1);
   border: 1px solid rgba(229, 85, 77, 0.38);
@@ -849,7 +855,7 @@ body {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .eval-row.eval-row-grid .row-pct { color: var(--text-3); }
-.eval-row.eval-row-grid .row-tag { display: flex; justify-content: flex-start; }
+.eval-row.eval-row-grid .row-tag { display: flex; justify-content: flex-start; gap: 6px; flex-wrap: wrap; }
 .eval-row.eval-row-grid .row-actions {
   display: flex; gap: 6px; justify-content: flex-end;
 }

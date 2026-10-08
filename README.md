@@ -3,7 +3,7 @@
 <div align="center">
 
 ![License](https://img.shields.io/badge/license-MIT-yellow)
-![Tests](https://img.shields.io/badge/tests-241%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-315%20passing-brightgreen)
 ![JavaScript](https://img.shields.io/badge/vanilla-JS-f7df1e?logo=javascript&logoColor=black)
 ![Build](https://img.shields.io/badge/build-none-lightgrey)
 
@@ -30,7 +30,8 @@
 - **潜力评估**：`potential = 当前评分 + 待激活贡献 + 剩余可强化空间 × 最大词条权值`——未满级判强化价值、满级判替换价值
 - **3/4 词条初始圣遗物**：通过「待激活」状态支持未激活词条的录入
 - **数据管理**：localStorage 持久化，带版本化 migrate 数据迁移，防丢字段；JSON 导出 / 导入 / 合并（并集）
-- **首页筛选（双路径）**：①按角色 = 套装多选过滤（同套 ≥2 件命中）；②按散件 = 散件部位 + 主词条过滤（两条件 AND 叠加，均可单独使用）；两条路径互斥、切换即清空另一路；筛选状态可持久化，刷新自动恢复上次路径与条件
+- **首页筛选（双路径）**：①按角色 = **角色套装字段**多选过滤（四件套 / 两个两件套；留空 = 「其他」不判套装）；②按散件 = 散件部位 + 主词条过滤（两条件 AND 叠加，均可单独使用）；两条路径互斥、切换即清空另一路；筛选状态可持久化，刷新自动恢复上次路径与条件
+- **角色套装字段**：每个角色固化「所穿套装」（1 个 = 四件套 / 2 个 = 两个两件套 / 留空 = 其他），作为套装类判定的唯一来源；圣遗物实况与声明不符时在详情页黄色提示 + 一键「按实况更新」（不自动改写）
 
 ## 界面预览
 
@@ -47,7 +48,7 @@
 ## 运行测试
 
 ```bash
-# 算法层与文本识别回归测试（241 条用例，Node 环境）
+# 算法层与文本识别回归测试（315 条用例，Node 环境）
 node test.js
 
 # DOM 集成冒烟测试（需 jsdom：npm i jsdom）

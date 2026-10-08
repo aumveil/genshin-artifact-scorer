@@ -17,16 +17,59 @@
   // mainValue：主属性数值（不入库、不展示，算法本就不依赖）。
   // 历史备份与旧 localStorage 数据经此剥离，保证数据结构干净。
   const DEPRECATED_ARTIFACT_FIELDS = ["note", "mainValue"];
+
+  /**
+   * 「角色套装」字段一次性预填（2026-10-09）。
+   * 策略 b：字段为准、圣遗物变更**不自动同步**；但迁移时把当前实况一次性快照进字段，
+   * 免得手工填 77 次。实现要点：
+   *   · 触发条件 = `!Array.isArray(role.sets)`（键不存在 ⇒ 从未迁移 / 外部导入的旧数据）。
+   *     **不**用 store 级标记、也不升级 STORAGE_VERSION —— storage key 内含 version，
+   *     改它等于换 key，会被当成「无数据」→ 看似全部丢失。
+   *     以「键是否存在」为判据的好处：用户主动留空（`sets: []` =「其他」）不会被二次填上，
+   *     新备份往返导入也不会被覆盖，而旧 localStorage 与莫娜导入仍能自动推导。
+   *   · 推导不出唯一答案的（3+1+1、2+1+1+1、部位未录全）→ 写空数组（=「其他」，不判套装）。
+   *   · 归入 sanitizeStore：load（刷新/重开）与 io.importFile（导入）两条路径同时生效。
+   */
+  function prefillRoleSets(store) {
+    if (!store || !Array.isArray(store.roles)) return store;
+    const core = global.App.core;
+    // 防御：storage.js 在 index.html 中先于 core.js 加载（script 顺序），
+    // 但本函数只在运行时（load / import）被调用，那时 core 必然已就绪；此处仅兜底极端情形。
+    if (!core) return store;
+    store.roles.forEach(role => {
+      if (!role || Array.isArray(role.sets)) return;
+      role.sets = core.deriveSetsFromArtifacts(role);
+    });
+    return store;
+  }
+
+  /**
+   * 数据清洗（load 与 import 两条路径共用）：
+   *  1. 剥离废弃的圣遗物字段（note / mainValue）；
+   *  2. 角色 element 缺失或为空时，按 CHARACTER_ELEMENT_HINTS 自动补全（2026-10-09）；
+   *  3. 角色 sets 字段从未迁移的旧数据预填一次（2026-10-09）。
+   *
+   * 补全规则：**只填空值，绝不覆盖已有值** —— 用户手工选定的元素优先保留
+   * （含映射表中未收录的角色）；映射表查不到的角色保持原样。
+   * 为何放在这里而不是适配器：load（刷新/重开）与 import（导入外部文件）都经过本函数，
+   * 一处即可覆盖存量数据与后续导入，无需为每条来源各写一遍。
+   */
   function sanitizeStore(store) {
     if (!store || !Array.isArray(store.roles)) return store;
     store.roles.forEach(role => {
-      const arts = (role && role.artifacts) || {};
+      if (!role) return;
+      if (!role.element) {
+        const guessed = C.CHARACTER_ELEMENT_HINTS[role.name];
+        if (guessed) role.element = guessed;
+      }
+      const arts = role.artifacts || {};
       C.SLOT_KEYS.forEach(key => {
         const art = arts[key];
         if (!art || typeof art !== "object") return;
         DEPRECATED_ARTIFACT_FIELDS.forEach(f => { delete art[f]; });
       });
     });
+    prefillRoleSets(store);
     return store;
   }
 
@@ -35,7 +78,14 @@
       const raw = localStorage.getItem(KEY);
       if (!raw) return emptyStore();
       const data = JSON.parse(raw);
-      return migrate(data);
+      const migrated = migrate(data);
+      // 迁移补过字段（如 element）时立即回写：否则内存里已补齐、localStorage 仍是空的，
+      // 会出现「导出有、存储没有」的不一致，且每次打开都要重算一遍。
+      try {
+        const next = JSON.stringify(migrated);
+        if (next !== raw) localStorage.setItem(KEY, next);
+      } catch (e) { /* 超容量/隐私模式：静默忽略，本次使用不受影响 */ }
+      return migrated;
     } catch (e) {
       console.warn("存储数据损坏，已重置：", e);
       return emptyStore();

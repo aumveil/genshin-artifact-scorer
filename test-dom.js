@@ -46,6 +46,7 @@ const path = require("path");
   role.effectiveStats = ["暴击率", "暴击伤害", "攻击力百分比"];
   role.weights = { "暴击率": 1, "暴击伤害": 1, "攻击力百分比": 0.8 };
   role.looseSlot = "goblet";
+  role.sets = ["炽烈的炎之魔女"];   // 角色套装字段（2026-10-09）：套装类判定读它
   ["flower", "plume", "sands", "goblet", "circlet"].forEach(slot => {
     // circlet 暴击率 3.3 无法档位分解 → 推断 null（无判据）→ 出切换按钮；其余 4 件 Σk=9 刚性 4 初始（静态标签）
     role.artifacts[slot] = {
@@ -71,6 +72,18 @@ const path = require("path");
     id: App.store.genId(), slot: "flower", set: "炽烈的炎之魔女", mainStat: "生命值",
     level: 20, substats: [{ stat: "暴击率", value: 7.4, activated: true }]
   };
+  // 补满其余 4 部位：套装类判定（roleSets）要求 5 部位录全（2026-10-09）。
+  // 这 4 件是**纯脚手架**，用三重手段保证它们「完全不可见」：
+  //   ① level 0  → 不进重塑候选（候选按 level>=20 收集）
+  //   ② substats []  → 不贡献任何评分（calcArtifactScore 只看副词条，角色分与 perfect 均不变）
+  //   ③ mainStat 填占位串（非真实词条名）→ 不会与其它角色同部位同主词条「撞车」而凭空充当
+  //      重塑宿主（宿主条件只查 部位存在 + 主词条相同，不看等级/副词条）。
+  //      若这里填真实主词条（如 死之羽=攻击力），「测试-正常」的死之羽/时之沙会多出转移行动，
+  //      默认 RV>0 卡数会从 3 变 5，与「显示无价值件」开关失去区分度。
+  role2.sets = ["炽烈的炎之魔女"];
+  ["plume", "sands", "goblet", "circlet"].forEach(slot => {
+    role2.artifacts[slot] = { id: App.store.genId(), slot, set: "炽烈的炎之魔女", mainStat: "占位", level: 0, substats: [] };
+  });
   App.store.updateRole(role2);
 
   // —— 场景 3：莫娜式角色（effectiveStats 空数组、部分部位空）——
@@ -83,6 +96,11 @@ const path = require("path");
     id: App.store.genId(), slot: "flower", set: "绝缘之旗印", mainStat: "生命值",
     level: 20, substats: [{ stat: "暴击率", value: 3.9, activated: true }]
   };
+  // 同样补满 5 部位（套装类判定的前提），4 件占位件口径同「测试-无散件」
+  role3.sets = ["绝缘之旗印"];
+  ["plume", "sands", "goblet", "circlet"].forEach(slot => {
+    role3.artifacts[slot] = { id: App.store.genId(), slot, set: "绝缘之旗印", mainStat: "占位", level: 0, substats: [] };
+  });
   App.store.updateRole(role3);
 
   App.ui.render();
@@ -140,20 +158,22 @@ const path = require("path");
     "· 件级下拉数:", filterSelects().length, filterSelects().length === 0 ? "✓" : "✗",
     "· 列表数:", listNames().length, listNames().length === 3 ? "✓" : "✗");
 
-  // ② 按角色：套装多选（≥2 件视为套装；面板内逐个勾选）
-  //    场景数据：测试-正常 5 件魔女；测试-无散件 1 件花魔女；测试-导入式 1 件花绝缘
+  // ② 按角色：套装多选（读角色套装字段 role.sets，2026-10-09 起不再按已录入件计数）
+  //    场景数据：测试-正常 sets=[魔女]；测试-无散件 sets=[魔女]；测试-导入式 sets=[绝缘之旗印]
   app.querySelector(".set-filter .set-btn").click();   // 打开面板
   await new Promise(r => setTimeout(r, 30));
   const setCheck = name => Array.from(app.querySelectorAll(".set-item")).find(l => l.textContent.trim() === name).querySelector("input");
   setCheck("炽烈的炎之魔女").click();
   await new Promise(r => setTimeout(r, 30));
   names = listNames();
-  console.log("路径①[魔女≥2件]:", names.join(", "), names.length === 1 && names[0] === "测试-正常" ? "✓" : "✗");
-  // 面板保持打开（局部刷新未重建），追加勾选「绝缘之旗印」→ 仍仅测试-正常（导入式仅 1 件绝缘，不满足 ≥2）
+  console.log("路径①[魔女]:", names.join(", "),
+    names.length === 2 && names[0] === "测试-正常" && names[1] === "测试-无散件" ? "✓" : "✗");
+  // 面板保持打开（局部刷新未重建），追加勾选「绝缘之旗印」→ 3 个角色全部命中（各含所选套装之一）
   setCheck("绝缘之旗印").click();
   await new Promise(r => setTimeout(r, 30));
   names = listNames();
-  console.log("路径①[魔女+绝缘 ≥2件]:", names.join(", "), names.length === 1 && names[0] === "测试-正常" ? "✓" : "✗");
+  console.log("路径①[魔女+绝缘]:", names.join(", "),
+    names.length === 3 && names[2] === "测试-导入式" ? "✓" : "✗");
 
   // ③ 切换到「按散件」：套装条件被清空（两条路不同时生效），该路出现部位/主词条下拉
   tabBtn("loose").click();
@@ -262,6 +282,9 @@ const path = require("path");
     // 默认仅显示 RV>0：场景1头(circlet 暴击率3.3 → baseline 低 → RV+0.84) + 场景1花/场景2花（同一转移行动对，各 RV+0.11）；
     // 场景1 羽/沙（原地 RV<0）不显示，场景1 杯（散件无宿主）与场景3 花（无有效词条、无同套宿主）无行动被排除
     console.log("重塑卡片数(默认 RV>0):", cards.length, cards.length === 3 ? "✓" : "✗");
+    if (process.env.DEBUG_REMODEL) {
+      Array.from(cards).forEach(c => console.log("   [卡]", c.querySelector(".c-title") ? c.querySelector(".c-title").textContent : c.textContent.slice(0, 80)));
+    }
     console.log("RV 徽章示例:", badges.slice(0, 2).join(" | "));
     if (!title || title.textContent !== "圣遗物重塑分析" || cards.length !== 3) process.exitCode = 1;
     // 三情况标签：场景1花的散件位是杯（花本身是套装件）→ 转移行动 kind = transfer，标签「同套转移」
@@ -356,12 +379,136 @@ const path = require("path");
     window.App.ui.render();
   }
 
+  // —— 方案 C 冒烟：充能不足不再否决替换（2026-09-29，真实报障场景：七七换新羽）——
+  {
+    const qiqi = App.store.newRole("测试-七七");
+    qiqi.effectiveStats = ["暴击率", "攻击力百分比", "元素充能效率"];
+    qiqi.weights = { "暴击率": 1, "攻击力百分比": 1, "元素充能效率": 1 };
+    qiqi.looseSlot = null;
+    qiqi.erRequirement = 180; qiqi.currentER = 180;
+    qiqi.sets = ["千岩牢固"];   // 套装字段：重塑宿主/情况判定读它
+    const mainOf = { flower: "生命值", plume: "攻击力", sands: "攻击力百分比", goblet: "攻击力百分比", circlet: "暴击率" };
+    const subOf = {
+      flower: [{ stat: "暴击率", value: 7.4 }, { stat: "防御力百分比", value: 13.1 }, { stat: "元素充能效率", value: 15.5 }, { stat: "攻击力百分比", value: 4.7 }],
+      // 现役羽充能 18.1%；新羽只有 11.0% → 替换后 172.9% < 180%（原口径据此否决）
+      plume: [{ stat: "元素精通", value: 21 }, { stat: "元素充能效率", value: 18.1 }, { stat: "攻击力百分比", value: 9.9 }, { stat: "暴击伤害", value: 12.4 }],
+      sands: [{ stat: "攻击力", value: 35 }, { stat: "元素精通", value: 21 }, { stat: "防御力", value: 16 }, { stat: "暴击伤害", value: 5.4 }],
+      goblet: [{ stat: "生命值", value: 747 }, { stat: "元素充能效率", value: 9.1 }, { stat: "元素精通", value: 19 }, { stat: "攻击力", value: 31 }],
+      circlet: [{ stat: "生命值", value: 299 }, { stat: "攻击力", value: 16 }, { stat: "元素精通", value: 19 }, { stat: "防御力", value: 21 }]
+    };
+    Object.keys(mainOf).forEach(slot => {
+      qiqi.artifacts[slot] = {
+        id: App.store.genId(), slot, set: "千岩牢固", mainStat: mainOf[slot], level: 20,
+        substats: subOf[slot].map(s => ({ stat: s.stat, value: s.value, activated: true }))
+      };
+    });
+    App.store.updateRole(qiqi);
+
+    window.document.getElementById("btnEvaluate").click();
+    await new Promise(r => setTimeout(r, 30));
+    const btnAddC = Array.from(app.querySelectorAll("button")).find(b => b.textContent.includes("录入新圣遗物"));
+    if (!btnAddC) { console.log("方案 C：评估页空态缺录入入口 ✗"); process.exitCode = 1; }
+    else {
+      btnAddC.click();
+      await new Promise(r => setTimeout(r, 30));
+      window.document.querySelector(".artifact-text").value =
+        "死之羽攻击力311+20 攻击力+14.6%·元素充能效率+11.0%·暴击率+5.8%·元素精通+21千岩牢固：(4)";
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "识别").click();
+      await new Promise(r => setTimeout(r, 30));
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "保存并评估").click();
+      await new Promise(r => setTimeout(r, 50));
+
+      const rowQiqi = Array.from(app.querySelectorAll(".eval-row"))
+        .find(r => { const n = r.querySelector(".row-role"); return n && n.textContent === "测试-七七"; });
+      console.log("充能不足仍列有价值:", rowQiqi ? "✓" : "✗", rowQiqi ? "" : "（该角色未出现在有提升列表）");
+      if (!rowQiqi) process.exitCode = 1;
+      const diffTxt = rowQiqi ? rowQiqi.querySelector(".row-diff").textContent : "";
+      const badgeTxt = rowQiqi ? Array.from(rowQiqi.querySelectorAll(".badge")).map(b => b.textContent).join("|") : "";
+      const okDiff = /^\+/.test(diffTxt);
+      const okBadge = /充能不足/.test(badgeTxt);
+      console.log("充能不足提示徽章:", okDiff && okBadge ? "✓" : "✗", `(词条差 ${diffTxt}；徽章 ${badgeTxt || "无"})`);
+      if (!(okDiff && okBadge)) process.exitCode = 1;
+      // 徽章配色：Δ<0 且替换后不足 → 红
+      const tagBadge = rowQiqi.querySelector(".row-tag .badge");
+      const okClsRed = !!tagBadge && /badge-red/.test(tagBadge.className);
+      console.log("充能徽章配色[lack→红]:", okClsRed ? "✓" : "✗", tagBadge ? `(${tagBadge.className})` : "（无徽章）");
+      if (!okClsRed) process.exitCode = 1;
+
+      // —— 替换后面板充能应联动更新（原行为：currentER 不变 → 首页仍显示绿色「达标」）——
+      const btnReplace = Array.from(rowQiqi.querySelectorAll(".row-actions button")).find(b => b.textContent === "替换");
+      btnReplace.click();
+      await new Promise(r => setTimeout(r, 30));
+      const okBtn = Array.from(window.document.querySelectorAll("#modalRoot button")).find(b => b.textContent === "确认替换");
+      if (!okBtn) { console.log("替换确认弹窗按钮缺失 ✗"); process.exitCode = 1; }
+      else {
+        okBtn.click();
+        await new Promise(r => setTimeout(r, 60));
+        const qiqiNow = App.store.getRoles().find(r => r.name === "测试-七七");
+        const okLink = Math.abs(qiqiNow.currentER - 172.9) < 1e-6;
+        console.log("替换后面板充能联动:", okLink ? "✓" : "✗", `(180 → ${qiqiNow.currentER}，应为 172.9)`);
+        if (!okLink) process.exitCode = 1;
+
+        // 首页徽章：绿「充能」（达标）→ 红「充能」（不足）
+        window.document.getElementById("logoBtn").click();
+        await new Promise(r => setTimeout(r, 40));
+        const card = Array.from(app.querySelectorAll(".role-card")).find(c => {
+          const n = c.querySelector(".rc-name"); return n && n.textContent === "测试-七七";
+        });
+        const badge = card ? card.querySelector(".badge") : null;
+        const okBadge2 = !!badge && /badge-red/.test(badge.className) && /充能不足/.test(badge.getAttribute("title") || "");
+        console.log("首页充能徽章联动:", okBadge2 ? "✓" : "✗",
+          badge ? `(${badge.className} | ${badge.getAttribute("title")})` : "（未找到角色卡）");
+        if (!okBadge2) process.exitCode = 1;
+
+        // 详情页充能块应显示新的面板充能
+        if (card) {
+          card.click();
+          await new Promise(r => setTimeout(r, 40));
+          const erItem = Array.from(app.querySelectorAll(".ov-item")).find(x => {
+            const l = x.querySelector(".lbl"); return l && l.textContent === "充能";
+          });
+          const okDetail = !!erItem && /172\.9/.test(erItem.textContent);
+          console.log("详情页面板充能联动:", okDetail ? "✓" : "✗", erItem ? `(${erItem.textContent})` : "（未找到充能块）");
+          if (!okDetail) process.exitCode = 1;
+        }
+        App.ui.render();
+        await new Promise(r => setTimeout(r, 30));
+      }
+
+      // —— 充能提示配色：再评估一件「充能提升且达标」的羽毛 → 绿「充能满足」（此时面板充能已被联动到 172.9）——
+      window.document.getElementById("btnEvaluate").click();
+      await new Promise(r => setTimeout(r, 30));
+      const addBtn2 = Array.from(app.querySelectorAll("button")).find(b => b.textContent.includes("录入新圣遗物"));
+      if (!addBtn2) { console.log("充能徽章配色[met→绿]: ✗ （评估页缺录入入口）"); process.exitCode = 1; }
+      else {
+        addBtn2.click();
+        await new Promise(r => setTimeout(r, 30));
+        window.document.querySelector(".artifact-text").value =
+          "死之羽攻击力311+20 攻击力+14.6%·元素充能效率+19.5%·暴击率+5.8%·元素精通+21千岩牢固：(4)";
+        Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "识别").click();
+        await new Promise(r => setTimeout(r, 30));
+        Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "保存并评估").click();
+        await new Promise(r => setTimeout(r, 50));
+        const rowMet = Array.from(app.querySelectorAll(".eval-row"))
+          .find(r => { const n = r.querySelector(".row-role"); return n && n.textContent === "测试-七七"; });
+        const badgeMet = rowMet ? rowMet.querySelector(".row-tag .badge") : null;
+        const okGreen = !!badgeMet && /badge-green/.test(badgeMet.className) && /充能满足/.test(badgeMet.textContent);
+        console.log("充能徽章配色[met→绿]:", okGreen ? "✓" : "✗",
+          badgeMet ? `(${badgeMet.className}|${badgeMet.textContent})` : "（未找到徽章）");
+        if (!okGreen) process.exitCode = 1;
+        const btnCancel2 = Array.from(app.querySelectorAll("button")).find(b => b.textContent === "放弃");
+        if (btnCancel2) { btnCancel2.click(); await new Promise(r => setTimeout(r, 30)); }
+      }
+    }
+  }
+
   // —— 方案 A 冒烟：无散件（5 件全套装）角色的异套件评估（冗余位自动识别为自由位）——
   {
     role2.looseSlot = null;
     role2.effectiveStats = ["暴击率", "暴击伤害", "攻击力百分比", "元素充能效率"];
     role2.weights = { "暴击率": 1, "暴击伤害": 1, "攻击力百分比": 0.8, "元素充能效率": 0.6 };
     role2.erRequirement = 180; role2.currentER = 180;
+    role2.sets = ["炽烈的炎之魔女"];   // 5 件全套装 → 套装字段（套装类判定读它）
     const MAIN2 = { flower: "生命值", plume: "攻击力", sands: "攻击力百分比", goblet: "火元素伤害加成", circlet: "暴击伤害" };
     Object.keys(MAIN2).forEach(slot => {
       role2.artifacts[slot] = {
@@ -402,6 +549,99 @@ const path = require("path");
     }
   }
 
+  // —— 角色套装字段（sets）冒烟：一致性警示条 → 「按实况更新」写回 → 2+2+1 展示 ——
+  {
+    const rs = App.store.newRole("测试-套装");
+    rs.element = "火";
+    rs.effectiveStats = ["暴击率", "攻击力百分比"];
+    rs.weights = { "暴击率": 1, "攻击力百分比": 1 };
+    rs.looseSlot = null;
+    // 实况 = 2+2+1：翠绿之影 ×2 + 绝缘之旗印 ×2 + 角斗士的终幕礼 ×1（→ deriveSetsFromArtifacts 应为前两个）
+    const SETS_OF = { flower: "翠绿之影", plume: "翠绿之影", sands: "绝缘之旗印", goblet: "绝缘之旗印", circlet: "角斗士的终幕礼" };
+    const MAINS_OF = { flower: "生命值", plume: "攻击力", sands: "攻击力百分比", goblet: "火元素伤害加成", circlet: "暴击伤害" };
+    Object.keys(MAINS_OF).forEach(slot => {
+      rs.artifacts[slot] = {
+        id: App.store.genId(), slot, set: SETS_OF[slot], mainStat: MAINS_OF[slot], level: 20,
+        substats: [{ stat: "暴击率", value: 3.9, activated: true },
+                   { stat: "攻击力百分比", value: 5.8, activated: true },
+                   { stat: "元素充能效率", value: 6.5, activated: true }]
+      };
+    });
+    rs.sets = ["翠绿之影"];   // 故意只声明 1 个 → 与实况（2+2+1）不符
+    App.store.updateRole(rs);
+    window.document.getElementById("logoBtn").click();   // 上一块停在评估视图，先回列表（render 按 view.type 分支）
+    await new Promise(r => setTimeout(r, 40));
+    const card = Array.from(app.querySelectorAll(".role-card")).find(c => {
+      const n = c.querySelector(".rc-name"); return n && n.textContent === "测试-套装";
+    });
+    if (!card) { console.log("套装字段冒烟: ✗ 未找到「测试-套装」卡片"); process.exitCode = 1; }
+    else {
+      card.click();
+      await new Promise(r => setTimeout(r, 60));
+      const setTxt = (app.querySelector("[data-role-sets]") || {}).textContent || "";
+      const okDeclared = /翠绿之影/.test(setTxt) && !/绝缘之旗印/.test(setTxt);
+      console.log("详情页套装块（字段为准，仅显示声明值）:", okDeclared ? "✓" : "✗", `(${setTxt.trim()})`);
+      if (!okDeclared) process.exitCode = 1;
+
+      const warn = app.querySelector(".warn.set-mismatch");
+      const okWarn = !!warn && /不一致/.test(warn.textContent) && /绝缘之旗印/.test(warn.textContent);
+      console.log("套装不一致警示条:", okWarn ? "✓" : "✗", warn ? `(${warn.textContent.replace(/\s+/g, " ").slice(0, 76)})` : "（未出现）");
+      if (!okWarn) process.exitCode = 1;
+
+      const btnSync = warn ? Array.from(warn.querySelectorAll("button")).find(b => b.textContent.includes("按实况更新")) : null;
+      if (!btnSync) { console.log("「按实况更新」按钮: ✗"); process.exitCode = 1; }
+      else {
+        btnSync.click();
+        await new Promise(r => setTimeout(r, 90));
+        const after = App.store.getRoles().find(x => x.name === "测试-套装");
+        const okSync = App.core.sameSetComposition(after.sets, ["翠绿之影", "绝缘之旗印"]);
+        console.log("「按实况更新」写回字段:", okSync ? "✓" : "✗", `(sets = ${JSON.stringify(after.sets)})`);
+        if (!okSync) process.exitCode = 1;
+        const warnGone = !app.querySelector(".warn.set-mismatch");
+        const setTxt2 = (app.querySelector("[data-role-sets]") || {}).textContent || "";
+        const okTwo = /翠绿之影/.test(setTxt2) && /绝缘之旗印/.test(setTxt2);
+        console.log("更新后警示条消失:", warnGone ? "✓" : "✗", "· 2+2+1 两个套装并列展示:", okTwo ? "✓" : "✗", `(${setTxt2.trim()})`);
+        if (!warnGone || !okTwo) process.exitCode = 1;
+        const persisted = JSON.parse(window.localStorage.getItem("gys_reliquary_v1") || "{}");
+        const pR = (persisted.roles || []).find(x => x.name === "测试-套装");
+        console.log("更新已落盘 localStorage:", pR && App.core.sameSetComposition(pR.sets, ["翠绿之影", "绝缘之旗印"]) ? "✓" : "✗");
+        if (!pR || !App.core.sameSetComposition(pR.sets, ["翠绿之影", "绝缘之旗印"])) process.exitCode = 1;
+      }
+    }
+  }
+
+  // —— 角色配置弹窗「取消」不得污染内存对象（2026-10-09 修：弹窗入口深拷贝 role）——
+  {
+    window.document.getElementById("logoBtn").click();
+    await new Promise(r => setTimeout(r, 40));
+    const c1 = Array.from(app.querySelectorAll(".role-card")).find(c => {
+      const n = c.querySelector(".rc-name"); return n && n.textContent === "测试-正常";
+    });
+    if (!c1) { console.log("配置弹窗取消冒烟: ✗ 未找到「测试-正常」卡片"); process.exitCode = 1; }
+    else {
+      c1.click();
+      await new Promise(r => setTimeout(r, 60));
+      const before = JSON.stringify(App.store.getRoles().find(x => x.name === "测试-正常").effectiveStats);
+      const btnCfg2 = Array.from(app.querySelectorAll(".detail-head button")).find(b => b.textContent.includes("角色配置"));
+      btnCfg2.click();
+      await new Promise(r => setTimeout(r, 80));
+      const chip = Array.from(window.document.querySelectorAll("#cChips .chip")).find(c => !c.classList.contains("on"));
+      if (!chip) { console.log("配置弹窗取消冒烟: ✗ 未找到未选中的词条 chip"); process.exitCode = 1; }
+      else {
+        chip.click();
+        await new Promise(r => setTimeout(r, 50));
+        window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        await new Promise(r => setTimeout(r, 80));
+        const after2 = JSON.stringify(App.store.getRoles().find(x => x.name === "测试-正常").effectiveStats);
+        console.log("配置弹窗点 chip 后取消 · 内存未污染:", before === after2 ? "✓" : "✗", `(${before} → ${after2})`);
+        if (before !== after2) process.exitCode = 1;
+      }
+    }
+  }
+
   console.log("捕获错误:", window.__testErrors.length ? window.__testErrors : "无");
-  process.exit(0);
+  if (window.__testErrors.length) process.exitCode = 1;
+  // 退出码 = 累计断言结果。⚠️ 勿写死 process.exit(0)：那会把上面所有 exitCode = 1 全部吞掉，
+  //    令 `node test-dom.js; echo $?` 永远为 0、CI/脚本无法感知失败（2026-10-09 修）。
+  process.exit(process.exitCode || 0);
 })().catch(e => { console.error("脚本异常:", e && e.stack ? e.stack : e); process.exit(1); });

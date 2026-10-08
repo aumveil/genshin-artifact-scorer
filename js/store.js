@@ -53,6 +53,7 @@
       id: genId(),
       name: name || "新角色",
       element: global.App.constants.CHARACTER_ELEMENT_HINTS[name] || "",
+      sets: [],                  // 角色所穿套装（0 个=其他/不判套装；1 个=四件套；2 个=两个两件套）
       looseSlot: "goblet",
       effectiveStats: [],
       weights: {},
@@ -93,14 +94,41 @@
     return true;
   }
 
-  /** 替换某部位圣遗物（确认替换后调用；旧件直接丢弃） */
+  /**
+   * 替换某部位圣遗物（确认替换 / 编辑已穿戴件时调用；旧件直接丢弃）。
+   * 充能联动（2026-09-29）：面板充能 `currentER` 按**副词条充能贡献差**自动更新，
+   * 与算法三 `evaluateAgainst` 的 `newER = currentER − ERContrib(旧) + ERContrib(新)` 同口径
+   * ——否则替换后面板仍显示替换前的值，首页徽章会继续显示替换前的充能状态。
+   * 边界：仅当充能已配置（`currentER` 为数值）时联动；**主词条充能不在联动范围**
+   * （`ERContrib` 只算副词条）——评估→替换路径本就要求主词条与被替换件一致，故不会发生；
+   * 但详情页「编辑已穿戴件」可改主词条，故此处报告 `mainStatChanged` / `erMainStatTouched`，
+   * 由 UI 提示用户手动核对面板充能。
+   * @returns {boolean|Object} 角色不存在 → false；否则 { ok:true, erFrom, erTo, erDelta, mainStatChanged, erMainStatTouched }
+   */
   function replaceArtifact(roleId, slot, newArtifact) {
     const role = getRole(roleId);
     if (!role) return false;
+    const old = role.artifacts[slot] || null;
     role.artifacts[slot] = JSON.parse(JSON.stringify(newArtifact));
+    const next = role.artifacts[slot];
+    let erFrom = null, erTo = null, erDelta = 0;
+    if (Number.isFinite(role.currentER)) {
+      const core = global.App.core;
+      // 取 2 位小数：抵消浮点尾差（否则「充能未变化」会被当成有变化，弹出「180% → 180%」提示）
+      erDelta = Math.round((core.ERContrib(next) - core.ERContrib(old)) * 100) / 100;
+      if (erDelta) {
+        erFrom = role.currentER;
+        erTo = Math.round((role.currentER + erDelta) * 10) / 10;   // 保留 1 位小数，消除浮点尾差
+        role.currentER = erTo;
+      }
+    }
+    // 主词条是否变化；变化且任一侧是充能主词条 → 面板充能还需手动核对（主词条充能不计入自动联动）
+    const mainStatChanged = !!(old && old.mainStat !== next.mainStat);
+    const erMainStatTouched = mainStatChanged
+      && (old.mainStat === "元素充能效率" || next.mainStat === "元素充能效率");
     role.updatedAt = Date.now();
     save();
-    return true;
+    return { ok: true, erFrom, erTo, erDelta, mainStatChanged, erMainStatTouched };
   }
 
   /** 覆盖整个 store（导入用） */

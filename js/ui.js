@@ -169,7 +169,7 @@
   function renderRoleList(roles) {
     const wrap = el("div");
     // 筛选分两条互斥路径（标签页切换，切换即清空另一路；状态存模块级 listFilter，独立于 view）：
-    //   ① 按角色 mode="role" ：只筛套装（该角色已录入件中属于所选套装的件数 ≥ 2）
+    //   ① 按角色 mode="role" ：只筛套装（读角色套装字段 role.sets，2026-10-09 起不再按已录入件计数）
     //   ② 按散件 mode="loose"：只筛散件部位（role.looseSlot）与主词条（该部位已录入件的 mainStat）
     const f = listFilter;
     if (!Array.isArray(f.sets)) f.sets = [];
@@ -191,12 +191,9 @@
       return roles.filter(role => {
         if (f.mode === "role") {
           if (!f.sets.length) return true;                      // 未选套装 → 不筛
-          // 套装判定：已录入圣遗物中套装 ∈ 所选集合的件数 ≥ 2（2 件套即算套装，固定阈值）
-          const hit = C.SLOT_KEYS.filter(s => {
-            const art = role.artifacts && role.artifacts[s];
-            return !!(art && art.set && f.sets.includes(art.set));
-          }).length;
-          return hit >= 2;
+          // 套装判定（2026-10-09）：读角色套装字段 —— 命中 ⟺ roleSets(role) 与所选集合有交集。
+          // 不再按「已录入件中该套装 ≥ 2 件」计数；未录全（当这个角色不存在）与留空（「其他」）的角色不命中。
+          return core.roleSets(role).some(s => f.sets.includes(s));
         }
         // 按散件：散件部位 + 主词条（AND 叠加；两者均可单独使用）
         if (f.slot && role.looseSlot !== f.slot) return false;
@@ -216,7 +213,7 @@
     // —— 筛选栏：路径标签页（按角色 / 按散件）+ 当前路条件 + 清除 ——
     const fBar = el("div", "filter-bar");
     const tabs = el("div", "filter-tabs");
-    [{ key: "role", label: "按角色", tip: "按套装筛选角色：已录入件中属于所选套装的件数 ≥ 2" },
+    [{ key: "role", label: "按角色", tip: "按套装筛选角色：角色所穿套装（角色配置中的套装构成）包含所选套装" },
      { key: "loose", label: "按散件", tip: "按散件筛选角色：散件部位 + 该部位的主词条" }].forEach(p => {
       const tab = el("button", "ftab" + (f.mode === p.key ? " active" : ""), p.label);
       tab.type = "button";
@@ -236,7 +233,7 @@
     const btnClear = el("button", "btn btn-sm", "✕ 清除");
 
     if (f.mode === "role") {
-      // —— ① 按角色：套装多选（下拉 checkbox 面板；≥2 件视为套装，固定无件数选择）——
+      // —— ① 按角色：套装多选（下拉 checkbox 面板；判定读角色套装字段 role.sets，不数件数）——
       const setBox = el("div", "set-filter");
       const setBtnText = () => f.sets.length ? `套装 ${f.sets.length}套 ▾` : "套装 ▾";
       const setBtn = el("button", "btn btn-sm set-btn", setBtnText());
@@ -315,7 +312,7 @@
       if (isActive()) {
         infoEl.textContent = `筛选 ${filtered.length}/${roles.length} 个角色` +
           (f.mode === "role"
-            ? ` · 套装 ${f.sets.join("、")}（≥2件）`
+            ? ` · 套装 ${f.sets.join("、")}`
             : (f.slot ? ` · 散件·${C.SLOTS[f.slot].name}` : "") + (f.mainStat ? ` · ${f.mainStat}` : "")) +
           `，按分数降序`;
         infoEl.style.display = "";
@@ -409,6 +406,11 @@
         `<span class="val">${isFinite(role.currentER) ? role.currentER : 0}%<i>需求 ${isFinite(role.erRequirement) ? role.erRequirement : 0}%</i>${erWarn}</span></div>`
       : "";
     const pctClamped = Math.min(100, Math.max(0, score.percent));
+    // 角色所穿套装（2026-10-09 起为角色级固有字段，不再从圣遗物实时推导）
+    const cSets = core.roleSets(role);
+    const setsHtml = cSets.length
+      ? cSets.map(s => `<b>${esc(s)}</b>`).join("")
+      : '<span class="eff-none">其他 / 不判套装</span>';
     ov.innerHTML =
       `<div class="big">${score.percent.toFixed(1)}<em>分</em></div>` +
       `<div class="ov-main">` +
@@ -421,9 +423,31 @@
       `<span class="val">${score.perfect.toFixed(2)}</span></div>` +
       `<div class="ov-item"><span class="lbl">有效词条</span>` +
       `<span class="val ov-eff">${effHtml}</span></div>` +
+      `<div class="ov-item"><span class="lbl">套装</span>` +
+      `<span class="val ov-eff" data-role-sets>${setsHtml}</span></div>` +
       erBlock +
       `</div></div>`;
     wrap.appendChild(ov);
+
+    // 套装字段 vs 圣遗物实况不一致 → 黄字警告 + 一键「按实况更新」（策略 b：字段为准，不自动同步）
+    // 仅在「5 部位录全 且 字段非空」时检查（未录全＝当这个角色不存在；留空＝「其他」，无可比对）
+    const cons = core.checkSetConsistency(role);
+    if (cons.checked && cons.mismatch) {
+      const warn = el("div", "warn set-mismatch");
+      warn.innerHTML = `<span>⚠ 角色套装字段与圣遗物实况不一致：字段为「${esc(cSets.join(" + "))}」，` +
+        `实况为「${cons.actual.length ? esc(cons.actual.join(" + ")) : "其他（无法归入四件套 / 两个两件套）"}」。</span>`;
+      const btnSync = el("button", "btn btn-sm", "按实况更新");
+      btnSync.title = "把圣遗物的实际套装构成写回角色套装字段";
+      btnSync.addEventListener("click", () => {
+        role.sets = cons.actual.slice();
+        const r = store.updateRole(role);
+        if (r && r.error) { feedback.toast(r.error, "error"); return; }
+        feedback.toast(`已按实况更新套装：${cons.actual.length ? cons.actual.join(" + ") : "留空（其他）"}`, "success");
+        render();
+      });
+      warn.appendChild(btnSync);
+      wrap.appendChild(warn);
+    }
 
     // 5 部位卡
     const grid = el("div", "artifact-grid");
@@ -829,10 +853,15 @@
         render();
         feedback.toast("已加入重塑分析列表（会话内有效）", "success");
       } else if (isEdit) {
-        // 编辑已穿戴件：直接保存到角色
-        store.replaceArtifact(role.id, artifact.slot, artifact);
+        // 编辑已穿戴件：直接保存到角色（store 内按副词条充能差联动更新面板充能）
+        const linkRes = store.replaceArtifact(role.id, artifact.slot, artifact);
         closeModal();
         render();
+        const note = erLinkNote(linkRes);
+        if (note) feedback.toast(`面板充能已联动更新：${note}`, "success");
+        else if (linkRes && linkRes.erMainStatTouched) {
+          feedback.toast("主词条已变更且涉及充能：主词条充能不计入自动联动，请手动更新面板充能", "warn", 4200);
+        }
       } else {
         // 新圣遗物：临时对象 → 价值评估（弹窗 or 独立评估页）
         pendingArtifact = artifact;
@@ -921,7 +950,7 @@
         `<span>潜力 ${fmt(r.potentialScore)}（现 ${fmt(r.newCurrentScore)}${r.remaining ? `，剩${r.remaining}次` : ""}）</span>` +
         `<span class="${diffCls}">${r.diffToCurrent >= 0 ? "+" : ""}${fmt(r.diffToCurrent)} 词条</span>` +
         (r.newPercent != null ? `<span>替换后 ${r.newPercent.toFixed(1)} 分</span>` : "") +
-        `<span>充能 ${fmt(r.newER)}%${r.tags.length ? ` <span class="badge badge-yellow">${esc(r.tags[0])}</span>` : ""}</span>` +
+        `<span>充能 ${fmt(r.newER)}%${r.tags.length ? ` <span class="badge ${erTagCls(r.erTagLevel)}">${esc(r.tags[0])}</span>` : ""}</span>` +
         `</div>`;
       box.appendChild(card);
     });
@@ -929,13 +958,28 @@
     return { box, res };
   }
 
-  /** 执行替换：写入角色该部位；情况三（套装件替换散件）时散件部位置空 */
+  /** 执行替换：写入角色该部位（store 内按副词条充能差联动更新 currentER）；情况三时散件部位置空
+   *  @returns {Object|false} store.replaceArtifact 的结果（含 erFrom/erTo/erDelta） */
   function applyReplace(role, art, isSetSwap) {
-    store.replaceArtifact(role.id, art.slot, art);
+    const res = store.replaceArtifact(role.id, art.slot, art);
     if (isSetSwap) {
       role.looseSlot = null;   // 替换后无散件（5 件全套装）
       store.updateRole(role);
     }
+    return res;
+  }
+
+  /** 充能提示文案片段（未联动/无变化时返回空串），如「面板充能 180% → 172.9%」 */
+  function erLinkNote(res) {
+    if (!res || res.erFrom == null || res.erTo == null) return "";
+    return `面板充能 ${fmt(res.erFrom)}% → ${fmt(res.erTo)}%`;
+  }
+
+  /** 充能提示徽章配色（2026-09-29）：不足红 / 补足黄 / 满足绿 */
+  function erTagCls(level) {
+    if (level === "lack") return "badge-red";
+    if (level === "met") return "badge-green";
+    return "badge-yellow";
   }
 
   /** 价值评估弹窗（角色详情「评估替换」入口） */
@@ -961,11 +1005,13 @@
         const res = core.evaluateArtifact(pendingArtifact, role);
         const setSwap = res.results.some(r => r.isSetSwap);
         const doReplace = () => {
-          applyReplace(role, pendingArtifact, setSwap);
+          const linkRes = applyReplace(role, pendingArtifact, setSwap);
           pendingArtifact = null;
           evalHidden.clear();
           closeModal();
           render();
+          const note = erLinkNote(linkRes);
+          if (note) feedback.toast(`已替换，「${role.name}」${note}`, "success");
         };
         if (setSwap) {
           feedback.confirm({
@@ -1079,7 +1125,11 @@
           `<span class="row-pot">潜力 ${fmt(r.potentialScore)}（现 ${fmt(r.newCurrentScore)}${r.remaining ? `，剩${r.remaining}次` : ""}）</span>` +
           `<span class="row-eff">${effHtml}</span>` +
           `<span class="row-pct">${r.newPercent != null ? `替换后 ${r.newPercent.toFixed(1)} 分` : ""}</span>` +
-          `<span class="row-tag">${r.isSetSwap ? `<span class="badge badge-yellow">替换后无散件</span>` : ""}</span>`;
+          // 状态标签：替换后失去散件（情况三）/ 充能提示（2026-09-29：按替换对充能的影响分级配色——不足红 / 补足黄 / 满足绿）
+          `<span class="row-tag">` +
+            (r.isSetSwap ? `<span class="badge badge-yellow">替换后无散件</span>` : "") +
+            (r.tags.length ? `<span class="badge ${erTagCls(r.erTagLevel)}">${esc(r.tags[0])}</span>` : "") +
+          `</span>`;
         // 点击角色名 → 跳转该角色详情页（评估临时对象保留，返回评估页结果仍在）
         row.querySelector(".row-role").addEventListener("click", () => {
           view = { type: "detail", roleId: role.id };
@@ -1100,10 +1150,11 @@
           btn.addEventListener("click", () => {
             const slotName = C.SLOTS[art.slot].name;
             const doReplace = () => {
-              applyReplace(role, art, r.isSetSwap);
+              const linkRes = applyReplace(role, art, r.isSetSwap);
               pendingArtifact = null;
               evalHidden.clear();
-              feedback.toast(`已替换到「${role.name}」的${slotName}`, "success");
+              const note = erLinkNote(linkRes);
+              feedback.toast(`已替换到「${role.name}」的${slotName}` + (note ? `（${note}）` : ""), "success");
               render();
             };
             if (r.isSetSwap) {
@@ -1367,6 +1418,10 @@
 
   // ============ 角色配置弹窗 ============
   function openRoleConfigModal(role) {
+    // 深拷贝：弹窗内的编辑（有效词条 chip 点击、权值输入即时写；名称/套装/充能保存时才读）
+    // 一律作用在副本上，只有「保存」才经 store.updateRole 写回。否则点过 chip 再「取消」，
+    // 内存中的角色对象已被改动（localStorage 尚未变），并在之后任意一次 save() 时被静默落盘（2026-10-09 修）。
+    role = JSON.parse(JSON.stringify(role));
     const body = el("div");
     const fName = el("div", "field", `<label>角色名</label><input id="cName" value="${esc(role.name)}">`);
     const fEle = el("div", "field");
@@ -1381,13 +1436,30 @@
       C.SLOT_KEYS.map(k =>
         `<option value="${k}" ${role.looseSlot === k ? "selected" : ""}>${C.SLOTS[k].name}</option>`).join("");
     fLoose.innerHTML = `<label>散件部位（5 件全套装可选「无散件」，此时按自由位自动评估）</label><select id="cLoose">${looseOpts}</select>`;
+
+    // 角色所穿套装（2026-10-09）：两个下拉 —— 恰填 1 个＝四件套（4+1）；填 2 个＝两个两件套（2+2+1）；
+    // 都留空＝其他（不判套装：不做套装类评估结论，首页「按角色」筛选也不命中）
+    const curSets = Array.isArray(role.sets) ? role.sets.filter(s => typeof s === "string" && s) : [];
+    const setCandidates = [];
+    (store.getCustomSets() || []).forEach(s => { if (s && !setCandidates.includes(s)) setCandidates.push(s); });
+    C.SETS.forEach(s => { if (!setCandidates.includes(s)) setCandidates.push(s); });
+    curSets.forEach(s => { if (!setCandidates.includes(s)) setCandidates.push(s); });   // 已填的自定义套装保证可回显
+    const setOpts = sel => '<option value="">（未选择）</option>' +
+      setCandidates.map(s => `<option value="${esc(s)}" ${sel === s ? "selected" : ""}>${esc(s)}</option>`).join("");
+    const fSets = el("div", "field");
+    fSets.innerHTML = `<label>角色所穿套装（填 1 个＝四件套；填 2 个＝两个两件套；都留空＝其他，不判套装）</label>` +
+      `<div class="form-row">` +
+      `<select id="cSet1">${setOpts(curSets[0] || "")}</select>` +
+      `<select id="cSet2">${setOpts(curSets[1] || "")}</select>` +
+      `</div>`;
+
     const fEr = el("div", "form-row",
       `<div class="field"><label>充能需求 (%)</label><input id="cEr" type="number" min="100" value="${isFinite(role.erRequirement) ? role.erRequirement : ""}"></div>` +
       `<div class="field"><label>当前面板充能 (%)</label><input id="cER" type="number" min="100" value="${isFinite(role.currentER) ? role.currentER : ""}"></div>`);
 
     const fEff = el("div", "field");
     fEff.innerHTML = "<label>有效词条（点击选择）</label><div class='chips' id='cChips'></div>";
-    body.append(fName, fEle, fLoose, fEr, fEff);
+    body.append(fName, fEle, fSets, fLoose, fEr, fEff);
 
     const weightsBox = el("div", "field");
     body.appendChild(weightsBox);
@@ -1447,6 +1519,9 @@
     btnSave.addEventListener("click", () => {
       role.name = fName.querySelector("#cName").value.trim();
       role.element = fEle.querySelector("#cEle").value || "";
+      // 套装：选择项过滤空值后压缩（只填了第 2 个 → 自动提到第 1 个），最多两个
+      role.sets = [fSets.querySelector("#cSet1").value, fSets.querySelector("#cSet2").value]
+        .map(v => String(v || "").trim()).filter(Boolean).slice(0, 2);
       role.looseSlot = fLoose.querySelector("#cLoose").value || null;
       // 充能：仅当「元素充能效率」为有效词条时保存（否则存 null，算法自动不惩罚/不提示）
       if (hasER(role)) {
