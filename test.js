@@ -493,30 +493,32 @@ console.log("== 算法四：重塑价值评估（算法文档 五）==");
   assert(rowsNone.length === 0, "全关 → 无行动可评估，列表为空", rowsNone.length);
 }
 
-console.log("== 算法四补充：3/4 初始自动推断（inferInitialCount，单发档位分解）==");
+console.log("== 算法四补充：3/4 初始自动推断（inferInitialCount，区间法 · 2026-10-10）==");
 {
   const mk = (subs, level) => ({ slot: "flower", set: "X", mainStat: "生命值", level: level ?? 20, substats: subs });
   const s = (stat, value) => ({ stat, value, activated: true });
+  assert(C.DISPLAY_HALF.percent === 0.05 && C.DISPLAY_HALF.flat === 0.5,
+    "面板显示舍入半宽 = 0.05(percent) / 0.5(flat)", JSON.stringify(C.DISPLAY_HALF));
 
   // 刚性 4 初始：各词条可行发数 k 均唯一，Σk = 1+2+2+4 = 9（仅可 4 初始 = 9 发）
   const art4 = mk([
-    s("暴击率", 3.1),          // k∈{1}：31 为单发档位，两发最小 54
-    s("暴击伤害", 11.6),       // k∈{2}：54+62=116，一发不含 116、三发最小 162
-    s("元素充能效率", 11.0),   // k∈{2}：45+65=110，三发最小 135
-    s("防御力", 76)            // k∈{4}：19×4=76，三发最大 69、五发最小 80
+    s("暴击率", 3.1),          // k∈{1}：区间 [2.65,3.95]，两发下限 5.3
+    s("暴击伤害", 11.6),       // k∈{2}：区间 [10.7,15.7]，三发下限 16.05
+    s("元素充能效率", 11.0),   // k∈{2}：区间 [8.9,13.1]
+    s("防御力", 76)            // k∈{4}：区间 [62,94]，三发上限 70.5、五发下限 77.5
   ]);
-  assert(core.inferInitialCount(art4) === 4, "刚性 4 初始（Σk=9 唯一分解）→ 4", core.inferInitialCount(art4));
+  assert(core.inferInitialCount(art4) === 4, "刚性 4 初始（Σk=9 唯一）→ 4", core.inferInitialCount(art4));
 
   // 刚性 3 初始：Σk = 1+1+2+4 = 8（仅可 3 初始 = 8 发）
   const art3 = mk([
     s("暴击率", 3.1),          // k∈{1}
     s("暴击伤害", 5.4),        // k∈{1}
-    s("攻击力百分比", 9.4),    // k∈{2}：41+53=94，三发最小 123
-    s("生命值", 836)           // k∈{4}：209×4=836，三发余数不整除、五发最小 1045
+    s("攻击力百分比", 9.4),    // k∈{2}：区间 [8.1,11.7]
+    s("生命值", 836)           // k∈{3,4}：但 Σ 上限仍为 8 → 3
   ]);
-  assert(core.inferInitialCount(art3) === 3, "刚性 3 初始（Σk=8 唯一分解）→ 3", core.inferInitialCount(art3));
+  assert(core.inferInitialCount(art3) === 3, "刚性 3 初始（Σk=8 唯一）→ 3", core.inferInitialCount(art3));
 
-  // 两可：精通 80 可为 k=4（19×3+23）或 k=5（16×5），Σ=8（4+2+1+1）与 Σ=9（5+2+1+1）皆可 → null
+  // 两可：精通 80 可为 k=4 或 k=5，Σ=8（4+2+1+1）与 Σ=9（5+2+1+1）皆可 → null
   const artAmb = mk([
     s("元素精通", 80),
     s("暴击率", 5.4),          // k∈{2}
@@ -525,9 +527,31 @@ console.log("== 算法四补充：3/4 初始自动推断（inferInitialCount，�
   ]);
   assert(core.inferInitialCount(artAmb) === null, "档位两可（Σ=8/9 皆可）→ null 回退默认", core.inferInitialCount(artAmb));
 
-  // 异常/边界：值无法档位分解、未满级、副词条不足 4 条 → null
+  // 区间法回归（本次口径变更的直接动机）：真实样例——录入自胡桃的「死之羽·炽烈的炎之魔女」。
+  // 旧等值分解因 15.5 / 8.6 无法由档位和精确凑出而判不了；区间法 Σk=2+2+3+1=8 唯一 → 3 初始。
+  const artReal = mk([
+    s("元素精通", 44),        // k∈{2}：三发下限 46.5 > 44
+    s("暴击伤害", 15.5),      // k∈{2}：三发下限 16.05 > 15.5；两发区间 [10.7,15.7]
+    s("暴击率", 8.6),         // k∈{3}：两发上限 7.9 < 8.6；三发区间 [7.95,11.85]
+    s("攻击力百分比", 5.8)    // k∈{1}：两发下限 8.1 > 5.8
+  ]);
+  assert(core.inferInitialCount(artReal) === 3,
+    "区间法：Σk=8 唯一 → 3（旧等值分解在此判不了）", core.inferInitialCount(artReal));
+
+  // 反向：旧等值分解会「假唯一」的件 → 区间法识别为两可 → null
+  // 攻击力% 21：旧口径只能凑出 41+53+58+58=210（唯一 4 发）；区间法 k∈{4,5}（4×4.05=16.2 / 5×4.05=20.25 ≤ 21）
+  const artFalseUnique = mk([
+    s("暴击率", 3.9),          // k∈{1}
+    s("攻击力百分比", 21),     // k∈{4,5}
+    s("暴击伤害", 12.4),       // k∈{2}
+    s("元素精通", 21)          // k∈{1}
+  ]);
+  assert(core.inferInitialCount(artFalseUnique) === null,
+    "区间法识别两可（旧等值分解会误判成 3）→ null", core.inferInitialCount(artFalseUnique));
+
+  // 异常/边界：Σ 不可能（1+1+1+4=7）、未满级、副词条不足 4 条 → null
   assert(core.inferInitialCount(mk([s("暴击率", 3.3), s("暴击伤害", 5.4), s("元素充能效率", 5.2), s("防御力", 76)])) === null,
-    "暴击率 3.3 无法档位分解 → null");
+    "Σk=7（既非 8 也非 9）→ null");
   assert(core.inferInitialCount(Object.assign({}, art4, { level: 19 })) === null, "未满级 → null");
   assert(core.inferInitialCount(mk(art4.substats.slice(0, 3))) === null, "副词条不足 4 条 → null");
   // 待激活词条不计入判据：4 有效 + 1 待激活 → 仍按 4 条推断

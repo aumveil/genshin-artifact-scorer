@@ -48,7 +48,8 @@ const path = require("path");
   role.looseSlot = "goblet";
   role.sets = ["炽烈的炎之魔女"];   // 角色套装字段（2026-10-09）：套装类判定读它
   ["flower", "plume", "sands", "goblet", "circlet"].forEach(slot => {
-    // circlet 暴击率 3.3 无法档位分解 → 推断 null（无判据）→ 出切换按钮；其余 4 件 Σk=9 刚性 4 初始（静态标签）
+    // 区间法（2026-10-10）：circlet 暴击率 3.3 按 k=1 相容 → 该件 Σk=1+2+3+2=8 → 静态标签「初始3」；
+    // 其余 3 件 Σk=2+2+3+2=9 → 静态标签「初始4」；场景2 花（单词条）无判据 → 切换按钮
     role.artifacts[slot] = {
       id: App.store.genId(), slot, set: "炽烈的炎之魔女",
       mainStat: slot === "flower" ? "生命值" : slot === "plume" ? "攻击力" : slot === "sands" ? "攻击力百分比" : slot === "goblet" ? "火元素伤害加成" : "暴击伤害",
@@ -358,23 +359,29 @@ const path = require("path");
     const cardsK4 = app.querySelectorAll(".remodel-card");
     console.log("谕告档重渲染:", cardsK4.length === 5 ? "✓" : "✗", `(${cardsK4.length} 卡)`);
     if (cardsK4.length !== 5) process.exitCode = 1;
-    // 3/4 初始自动推断（二态）：场景1 花/羽/沙（Σk=9）→ 静态标签「初始4」（无按钮）；
-    // 场景1 头（暴击率3.3 无判据）+ 场景2 花（单词条）→ 切换按钮「初始4」（null 回退默认 4）
+    // 3/4 初始自动推断（二态 · 区间法，2026-10-10 口径变更）：
+    //   场景1 花/羽/沙：k=2+2+3+2=9 → 静态标签「初始4」
+    //   场景1 头：暴击率 3.3 在区间法下按 k=1 相容 → Σk=1+2+3+2=8 → 静态标签「初始3」
+    //     （3.3 是游戏不会出现的显示值：旧等值分解当「无判据」→ 出按钮；区间法只要求区间相容，
+    //       不再拦「不可能值」，属已知取舍，见 2026-10-10 口径变更记录）
+    //   场景2 花（仅 1 条副词条）→ 无判据 → 切换按钮「初始4」（null 回退默认 4）
     const initTags = Array.from(app.querySelectorAll(".remodel-card .rm-init-static")).map(b => b.textContent);
     const initBtns0 = Array.from(app.querySelectorAll(".remodel-card .rm-init"));
-    const staticOk = initTags.length === 3 && initTags.every(t => /初始4/.test(t));
-    const btnOk = initBtns0.length === 2 && initBtns0.every(b => /初始4/.test(b.textContent));
+    const tags4 = initTags.filter(t => /初始4/.test(t)).length;
+    const tags3 = initTags.filter(t => /初始3/.test(t)).length;
+    const staticOk = initTags.length === 4 && tags4 === 3 && tags3 === 1;
+    const btnOk = initBtns0.length === 1 && /初始4/.test(initBtns0[0].textContent);
     console.log("3/4 初始推断二态:", staticOk && btnOk ? "✓" : "✗",
-      `(静态标签 ${initTags.length} 张全初始4: ${staticOk ? "✓" : "✗"}; 切换按钮 ${initBtns0.length} 个全初始4: ${btnOk ? "✓" : "✗"})`);
+      `(静态标签 ${initTags.length} 张：${tags4} 张初始4 / ${tags3} 张初始3: ${staticOk ? "✓" : "✗"}; 切换按钮 ${initBtns0.length} 个全初始4: ${btnOk ? "✓" : "✗"})`);
     if (!(staticOk && btnOk)) process.exitCode = 1;
     // 3/4 初始切换（仅两可/无判据件有按钮；会话内 override，重渲染不报错）
     const btnInit = app.querySelector(".remodel-card .rm-init");
     btnInit.click();
     await new Promise(r => setTimeout(r, 30));
     const initTexts = Array.from(app.querySelectorAll(".remodel-card .rm-init, .remodel-card .rm-init-static")).map(b => b.textContent);
-    const toggled = initTexts.filter(t => /初始3/.test(t)).length;   // 切换后按钮文案「初始3」（静态标签不受影响，仍全为初始4）
-    console.log("3/4 初始切换:", toggled === 1 ? "✓" : "✗", `(${toggled} 张切为 3 初始，共 ${initTexts.length} 卡)`);
-    if (toggled !== 1) process.exitCode = 1;
+    const toggled = initTexts.filter(t => /初始3/.test(t)).length;   // 1 张静态（场景1 头）+ 点按钮切出的 1 张
+    console.log("3/4 初始切换:", toggled === 2 ? "✓" : "✗", `(${toggled} 张为 3 初始，共 ${initTexts.length} 卡)`);
+    if (toggled !== 2) process.exitCode = 1;
     // 返回列表
     window.App.ui.render();
   }

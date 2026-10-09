@@ -399,12 +399,18 @@
   }
 
   /**
-   * 3/4 初始自动推断（2026-09-28）：按「单发档位分解」判定总 roll 数。
+   * 3/4 初始自动推断（2026-09-28 建；**2026-10-10 判据改为区间法**）。
    * 账本：4 初始 = 4 条×1 发初始 + 5 次强化 = 9 发；3 初始 = 3 发初始 + 首次强化生成第 4 条(1 发) + 4 次强化 = 8 发。
-   * 每条副词条显示值必为 k 发单发档位值（ROLL_TIERS 四档）之和，k ∈ 1..5（4 初始单条最多 1+4 发）。
-   * 对 4 条词条求可行 k 集合后枚举总和：仅可 Σ=9 → 4 初始；仅可 Σ=8 → 3 初始；
-   * 两者皆可（档位两可）或皆不可（异常值/未知词条）→ null（调用方回退默认 4 初始）。
-   * 显示值 ×10 整数化比较避免浮点误差；每词条枚举 ≤ C(k+3,3) ≤ 56 种组合，总量级毫秒级。
+   * 判据：每条副词条显示值 v 必落在「k 发档位和的相容区间」内：
+   *       k×(min档位 − half) ≤ v ≤ k×(max档位 + half)，k ∈ 1..5（4 初始单条最多 1+4 发）
+   *   half = 面板显示舍入半宽（C.DISPLAY_HALF：percent 0.05 / flat 0.5）——显示值本身是四舍五入的结果，
+   *   故只要求**区间相容**，不要求能被档位**精确重构**。
+   *   ⚠️ 旧口径（等值分解：k 发档位和必须严格等于显示值）把过强假设当硬条件，在档位和「跳档」处两头出错：
+   *     ① 漏判可行 k → 明明能判的件被当成「判不了」（实测 379 件里 130 件）；
+   *     ② 反向假唯一 → 两可件被错判成确定值（实测 70 件，如攻击力%21 只能凑 41+53+58+58）。
+   *   区间排除是**必要条件**（排除一定可靠），包含只是「可能」，故对 4 条词条求可行 k 集合后枚举总和：
+   *   仅可 Σ=9 → 4 初始；仅可 Σ=8 → 3 初始；两者皆可（两可）或皆不可（异常录入/Σ 不可能）→ null（回退默认 4 初始）。
+   *   显示值 ×100 整数化比较避免浮点尾差；每词条至多 5 次比较（原实现为 ≤56 组枚举）。
    */
   function inferInitialCount(artifact) {
     if (!artifact || artifact.level < C.MAX_LEVEL) return null;
@@ -412,21 +418,15 @@
     if (subs.length !== 4) return null;                    // 满级恒 4 条；不足则无判据
     const R = subs.map(s => {
       const tiers = C.ROLL_TIERS[s.stat];
-      if (!tiers) return null;                             // 未知词条（理论上不会出现）
-      const target = Math.round(s.value * 10);
-      const [t0, t1, t2, t3] = tiers.map(v => Math.round(v * 10));
+      if (!tiers || !(s.value > 0)) return null;           // 未知词条 / 值缺失（理论上不会出现）
+      const half = C.DISPLAY_HALF[C.STAT_TYPE[s.stat]] || 0;
+      const S = 100;                                       // ×100 整数化
+      const lo = Math.round((Math.min.apply(null, tiers) - half) * S);   // 单发下限
+      const hi = Math.round((Math.max.apply(null, tiers) + half) * S);   // 单发上限
+      const v = Math.round(s.value * S);
       const ks = [];
-      for (let k = 1; k <= 5; k++) {
-        let ok = false;
-        for (let a = 0; a <= k && !ok; a++)
-          for (let b = 0; a + b <= k && !ok; b++)
-            for (let c = 0; a + b + c <= k && !ok; c++) {
-              const d = k - a - b - c;
-              if (t0 * a + t1 * b + t2 * c + t3 * d === target) ok = true;
-            }
-        if (ok) ks.push(k);
-      }
-      return ks.length ? ks : null;                        // 该词条值无法由档位分解（超限录入等）
+      for (let k = 1; k <= 5; k++) if (v >= k * lo && v <= k * hi) ks.push(k);
+      return ks.length ? ks : null;                        // 任何发数都装不下（超限录入等）
     });
     if (R.some(r => r === null)) return null;
     const feasible = total => {

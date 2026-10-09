@@ -42,6 +42,11 @@
     "防御力": [16, 19, 21, 23]
   };
 
+  // 面板显示值的舍入半宽（3/4 初始区间推断用，2026-10-10）：
+  // 副词条显示值本身是四舍五入后的结果 —— percent 保留 1 位小数（±0.05）、flat 整数显示（±0.5）。
+  // 推断只要求「显示值落在 k 发档位和的相容区间内」，不要求能被档位精确重构。
+  const DISPLAY_HALF = { percent: 0.05, flat: 0.5 };
+
   // 副词条类型：percent = 百分比词条，flat = 数值词条
   const STAT_TYPE = {};
   for (const k in UMAX) {
@@ -217,7 +222,7 @@
   global.App = global.App || {};
   global.App.constants = {
     SLOTS, SLOT_KEYS, UMAX, STAT_TYPE, SUB_STATS, MAIN_STATS_BY_SLOT,
-    SLOT_ALIASES, STAT_ALIASES, SETS, SET_ALIASES, ROLL_TIERS, MAIN_SHORT,
+    SLOT_ALIASES, STAT_ALIASES, SETS, SET_ALIASES, ROLL_TIERS, DISPLAY_HALF, MAIN_SHORT,
     ELEMENTS, ELEMENT_KEYS, CHARACTER_ELEMENT_HINTS,
     MAX_LEVEL, MAX_ROLLS_PER_STAT, MIN_DIFF, MAX_WEIGHT, STORAGE_VERSION,
     ROLL_AVG, DUST_COST, REMODEL_K
