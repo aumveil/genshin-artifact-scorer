@@ -9,14 +9,20 @@
   const FILTER_KEY = "gys_reliquary_filter_v" + C.STORAGE_VERSION;   // 首页筛选状态（独立 key，随角色数据分开存）
 
   function emptyStore() {
-    return { version: C.STORAGE_VERSION, exportedAt: null, roles: [], customSets: [] };
+    return { version: C.STORAGE_VERSION, exportedAt: null, roles: [], customSets: [], collection: [] };
   }
 
   // —— 已废弃字段清理（2026-09-28）——
   // note：旧备注字段（曾由莫娜适配器写入「从莫娜占卜铺导入」）；
   // mainValue：主属性数值（不入库、不展示，算法本就不依赖）。
-  // 历史备份与旧 localStorage 数据经此剥离，保证数据结构干净。
+  // 历史备份与旧 localStorage 数据经此剥离，保证数据结构干净。藏品件同样适用。
   const DEPRECATED_ARTIFACT_FIELDS = ["note", "mainValue"];
+
+  /** 剥离单件圣遗物的废弃字段 */
+  function stripDeprecatedArtifactFields(art) {
+    if (!art || typeof art !== "object") return;
+    DEPRECATED_ARTIFACT_FIELDS.forEach(f => { delete art[f]; });
+  }
 
   /**
    * 「角色套装」字段一次性预填（2026-10-09）。
@@ -45,14 +51,14 @@
 
   /**
    * 数据清洗（load 与 import 两条路径共用）：
-   *  1. 剥离废弃的圣遗物字段（note / mainValue）；
+   *  1. 剥离废弃的圣遗物字段（note / mainValue）——角色已穿戴件与藏品库同时处理；
    *  2. 角色 element 缺失或为空时，按 CHARACTER_ELEMENT_HINTS 自动补全（2026-10-09）；
-   *  3. 角色 sets 字段从未迁移的旧数据预填一次（2026-10-09）。
+   *  3. 角色 sets 字段从未迁移的旧数据预填一次（2026-10-09）；
+   *  4. 藏品库（store.collection）缺失时补空数组（2026-10-11）——
+   *     ⚠️ 与 customSets 同类的迁移红线：漏了就会「导出有、刷新后没有」。
    *
    * 补全规则：**只填空值，绝不覆盖已有值** —— 用户手工选定的元素优先保留
    * （含映射表中未收录的角色）；映射表查不到的角色保持原样。
-   * 为何放在这里而不是适配器：load（刷新/重开）与 import（导入外部文件）都经过本函数，
-   * 一处即可覆盖存量数据与后续导入，无需为每条来源各写一遍。
    */
   function sanitizeStore(store) {
     if (!store || !Array.isArray(store.roles)) return store;
@@ -63,12 +69,11 @@
         if (guessed) role.element = guessed;
       }
       const arts = role.artifacts || {};
-      C.SLOT_KEYS.forEach(key => {
-        const art = arts[key];
-        if (!art || typeof art !== "object") return;
-        DEPRECATED_ARTIFACT_FIELDS.forEach(f => { delete art[f]; });
-      });
+      C.SLOT_KEYS.forEach(key => stripDeprecatedArtifactFields(arts[key]));
     });
+    // 藏品库（2026-10-11）：确保为数组，并逐件剥离废弃字段
+    if (!Array.isArray(store.collection)) store.collection = [];
+    store.collection.forEach(stripDeprecatedArtifactFields);
     prefillRoleSets(store);
     return store;
   }
@@ -103,7 +108,7 @@
     }
   }
 
-  // 按 version 升级（预留）；customSets 必须透传，否则刷新页面后自定义套装丢失
+  // 按 version 升级（预留）；customSets / collection 必须透传，否则刷新后自定义套装或藏品丢失
   function migrate(raw) {
     if (!raw || typeof raw !== "object" || !Array.isArray(raw.roles)) {
       return emptyStore();
@@ -113,7 +118,8 @@
       version: C.STORAGE_VERSION,
       exportedAt: raw.exportedAt || null,
       roles: raw.roles || [],
-      customSets: Array.isArray(raw.customSets) ? raw.customSets : []
+      customSets: Array.isArray(raw.customSets) ? raw.customSets : [],
+      collection: Array.isArray(raw.collection) ? raw.collection : []
     });
   }
 

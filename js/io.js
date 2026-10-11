@@ -14,7 +14,8 @@
       version: C.STORAGE_VERSION,
       exportedAt: new Date().toISOString(),
       roles: store.roles,
-      customSets: Array.isArray(store.customSets) ? store.customSets : undefined
+      customSets: Array.isArray(store.customSets) ? store.customSets : undefined,
+      collection: Array.isArray(store.collection) ? store.collection : undefined   // 藏品库（2026-10-11）
     };
     const json = JSON.stringify(payload, null, 2);
     const blob = new Blob(["\ufeff" + json], { type: "application/json;charset=utf-8" });
@@ -78,7 +79,9 @@
       return {
         version: C.STORAGE_VERSION, exportedAt: null,
         roles: incoming.roles.map(cloneRole),
-        customSets: Array.isArray(incoming.customSets) ? incoming.customSets.slice() : []
+        customSets: Array.isArray(incoming.customSets) ? incoming.customSets.slice() : [],
+        // 藏品库：覆盖模式跟随导入方（外部格式无藏品 → 空，属覆盖语义）
+        collection: (Array.isArray(incoming.collection) ? incoming.collection : []).map(cloneRole)
       };
     }
     // merge（自定义套装取并集，去重）
@@ -95,7 +98,9 @@
     (Array.isArray(incoming.customSets) ? incoming.customSets : []).forEach(s => {
       if (!customSets.includes(s)) customSets.push(s);
     });
-    return { version: C.STORAGE_VERSION, exportedAt: null, roles, customSets };
+    // 藏品库：合并模式**保留当前藏品**——藏品没有名字，无法按名合并；外部格式也不含藏品概念
+    const collection = Array.isArray(current.collection) ? current.collection.map(cloneRole) : [];
+    return { version: C.STORAGE_VERSION, exportedAt: null, roles, customSets, collection };
   }
 
   function cloneRole(role) {

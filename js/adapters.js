@@ -124,7 +124,7 @@
         const arr = raw[monaSlot] || [];
         arr.forEach(item => {
           if (!item) return;
-          if (!item.equip) { bagCount++; return; } // 背包件不导入（本工具无背包结构）
+          if (!item.equip) { bagCount++; return; } // 背包件不自动导入（如需收藏，可在「藏品」页手动录入）
           const roleName = String(item.equip).trim();
           const slot = MONA_SLOT_MAP[monaSlot];
           if (!byRole[roleName]) byRole[roleName] = {};

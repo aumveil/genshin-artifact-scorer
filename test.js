@@ -1314,5 +1314,136 @@ console.log("== 角色套装字段：迁移预算（一次性预填）==");
   global.App.store.deleteRole(nr.id);
 }
 
+console.log("\n== 藏品库（2026-10-11）==");
+{
+  // Node 环境桩（若前面的块已注入则复用）
+  if (typeof global.localStorage === "undefined") {
+    const mem = {};
+    global.localStorage = {
+      getItem: k => (k in mem ? mem[k] : null),
+      setItem: (k, v) => { mem[k] = String(v); },
+      removeItem: k => { delete mem[k]; },
+      clear: () => { for (const k in mem) delete mem[k]; }
+    };
+  }
+  if (typeof global.alert === "undefined") global.alert = () => {};
+
+  const mk = (id, subs, mainStat = "火元素伤害加成", slot = "goblet") =>
+    ({ id, slot, set: "炽烈的炎之魔女", mainStat, level: 20, substats: subs });
+
+  // —— 维度值 ——
+  const a1 = mk("a1", [
+    { stat: "暴击率", value: 3.9, activated: true },
+    { stat: "暴击伤害", value: 7.8, activated: true },
+    { stat: "攻击力百分比", value: 5.8, activated: true },
+    { stat: "元素精通", value: 23, activated: true }
+  ]);
+  assert(closeTo(core.dimValue(a1, "crit"), 15.6), "双爆值 = 2×3.9 + 7.8 = 15.6", core.dimValue(a1, "crit"));
+  assert(closeTo(core.dimValue(a1, "atkPct"), 5.8), "攻击%值 = 副词条 5.8");
+  assert(closeTo(core.dimValue(a1, "em"), 23), "精通值 = 23");
+  assert(core.dimValue(a1, "er") === 0, "无充能词条 → 充能值 0");
+  assert(closeTo(core.dimValue(mk("a2", [{ stat: "元素充能效率", value: 6.5, activated: false }]), "er"), 6.5),
+    "待激活词条计入维度值");
+
+  // —— 理论满值（4 初始口径）——
+  assert(closeTo(C.collectionFull("atkPct", "火元素伤害加成"), 34.8), "攻击%满值 6×5.8 = 34.8");
+  assert(closeTo(C.collectionFull("hpPct", "火元素伤害加成"), 34.8), "大生命满值 34.8");
+  assert(closeTo(C.collectionFull("defPct", "火元素伤害加成"), 43.8), "大防御满值 6×7.3 = 43.8");
+  assert(closeTo(C.collectionFull("em", "火元素伤害加成"), 138), "精通满值 6×23 = 138");
+  assert(closeTo(C.collectionFull("er", "火元素伤害加成"), 39), "充能满值 6×6.5 = 39");
+  assert(closeTo(C.collectionFull("crit", "火元素伤害加成"), 54.6), "双爆满值（一般桶）= 7×7.8 = 54.6");
+  assert(closeTo(C.collectionFull("crit", "暴击率"), 46.8), "双爆满值（暴击率头）= 6×7.8 = 46.8");
+  assert(closeTo(C.collectionFull("crit", "暴击伤害"), 46.8), "双爆满值（暴击伤害头）= 46.8");
+
+  // —— 桶清单 ——
+  assert(C.COLLECTION_BUCKETS.length === 26, "桶总数 = 26");
+  assert(C.COLLECTION_BUCKETS.filter(b => b.slot === "goblet").length === 12,
+    "空之杯 12 桶（7 元素伤 + 物理伤 + 4 主属性）");
+  assert(C.COLLECTION_BUCKETS.filter(b => b.slot === "circlet").length === 7,
+    "理之冠 7 桶（治疗 + 4 主属性 + 暴击率 + 暴击伤害）");
+  const erB = C.COLLECTION_BUCKET_BY_KEY["sands#元素充能效率"];
+  assert(C.collectionBucketDims(erB).length === 5 && !C.collectionBucketDims(erB).includes("er"),
+    "充能沙收 5 维（自动剔除充能维）");
+  assert(C.collectionBucketDims(C.COLLECTION_BUCKET_BY_KEY["circlet#暴击率"]).length === 6,
+    "暴击率头仍收 6 维（双爆维降为单支但保留）");
+
+  // —— 索引 / 入藏判定 / 极限程度 ——
+  const c1 = mk("c1", [{ stat: "元素充能效率", value: 19.4 }, { stat: "元素精通", value: 98 }]);
+  const c2 = mk("c2", [{ stat: "元素充能效率", value: 23.3 }, { stat: "元素精通", value: 42 }]);
+  const idx0 = core.collectionIndex([c1, c2]);
+  assert(idx0.holders.get("goblet#火元素伤害加成|er").arts[0] === c2, "充能位持有者 = c2（充能更高）");
+  assert(idx0.holders.get("goblet#火元素伤害加成|em").arts[0] === c1, "精通位持有者 = c1（精通更高）");
+  assert(idx0.redundant.length === 0, "两件各占一位 → 无冗余件");
+
+  const x = mk("x", [{ stat: "元素充能效率", value: 25.9 }, { stat: "元素精通", value: 40 }]);
+  const an = core.analyzeCollection(x, [c1, c2]);
+  assert(an.inScope && an.bucket.key === "goblet#火元素伤害加成", "藏品分析：识别所属桶");
+  const erRow = an.rows.find(r => r.dimKey === "er");
+  const emRow = an.rows.find(r => r.dimKey === "em");
+  assert(erRow.verdict === "better" && closeTo(erRow.delta, 2.6), "入藏判定：充能刷新纪录 +2.6", erRow.delta);
+  assert(emRow.verdict === "worse" && closeTo(emRow.delta, -58), "入藏判定：精通未超过（−58）", emRow.delta);
+  assert(closeTo(erRow.ratio, 25.9 / 39), "极限程度 = 维度值 ÷ 满值（充能维满值 39）", erRow.ratio);
+  assert(closeTo(erRow.potential, 25.9), "满级件潜力 = 当前值（rem = 0）");
+
+  // 未满级潜力：+16 → rem = 1
+  const x2 = mk("x2", [{ stat: "元素充能效率", value: 19.4 }, { stat: "元素精通", value: 40 }]);
+  x2.level = 16;
+  const erRow2 = core.analyzeCollection(x2, [c1]).rows.find(r => r.dimKey === "er");
+  assert(closeTo(erRow2.potential, 19.4 + 6.5), "未满级潜力 = 当前值 + rem×单发满挡（+16 → rem 1）", erRow2.potential);
+  const x3 = mk("x3", [{ stat: "元素精通", value: 40 }]);
+  x3.level = 16;
+  assert(closeTo(core.analyzeCollection(x3, [c1]).rows.find(r => r.dimKey === "er").potential, 0),
+    "无该词条 → 潜力不增长（强化不新增词条种类）");
+  // 不在 26 桶内的件 → 不参与藏品比对
+  const outs = mk("o", [{ stat: "暴击率", value: 3.9 }], "攻击力", "flower");
+  assert(core.analyzeCollection(outs, []).inScope === false, "花的主词条为生命值 → 攻击力主词条的花不在收藏桶内");
+
+  // —— 完全取代才删（store 层）——
+  const store = global.App.store;
+  const storage = global.App.storage;
+  assert(!!store && typeof store.addCollectionItem === "function", "store 暴露藏品接口");
+  store.getCollection().length = 0;
+  store.addCollectionItem(c1);
+  store.addCollectionItem(c2);
+  assert(store.getCollection().length === 2, "入库 2 件藏品");
+  store.addCollectionItem(x);                       // x 刷新充能位 → c2（只占充能位）被完全取代
+  assert(store.getCollection().length === 2, "x 入库后 c2 自动删除（件被完全取代）");
+  assert(!store.getCollection().some(i => i.id === "c2"), "c2 已移出藏品库");
+  assert(store.getCollection().some(i => i.id === "c1"), "c1 保留（仍占精通位）");
+  assert(store.getCollection().some(i => i.id === "x"), "x 已入库");
+  const xUpd = JSON.parse(JSON.stringify(store.getCollection().find(i => i.id === "x")));
+  xUpd.substats = [{ stat: "元素充能效率", value: 25.9 }, { stat: "元素精通", value: 120 }];
+  const ur = store.updateCollectionItem(xUpd);      // 精通超过 c1 → c1 被完全取代
+  assert(store.getCollection().length === 1 && store.getCollection()[0].id === "x", "更新后 c1 被完全取代并删除");
+  assert((ur.removed || []).length === 1, "updateCollectionItem 报告被删除件数");
+  store.removeCollectionItem("x");
+  assert(store.getCollection().length === 0, "手动删除藏品");
+
+  // —— 迁移 / 清洗透传（红线）——
+  assert(storage.emptyStore().collection.length === 0, "emptyStore 带 collection");
+  const mig = storage.migrate({ version: 1, exportedAt: null, roles: [], customSets: [], collection: [c1] });
+  assert(Array.isArray(mig.collection) && mig.collection.length === 1, "migrate 透传 collection");
+  const mig2 = storage.migrate({ version: 1, exportedAt: null, roles: [], customSets: [] });
+  assert(Array.isArray(mig2.collection) && mig2.collection.length === 0, "旧数据（无 collection）→ 补空数组");
+  const dirty = { id: "d", slot: "goblet", set: "S", mainStat: "火元素伤害加成", level: 20, note: "x", mainValue: 1, substats: [] };
+  storage.sanitizeStore({ roles: [], customSets: [], collection: [dirty] });
+  assert(dirty.note === undefined && dirty.mainValue === undefined, "sanitizeStore 剥离藏品件的废弃字段");
+
+  // —— 导出 / 导入：collection 必须透传（2026-10-11 修：io.js 曾漏掉 → 导出备份不含藏品、导入会清空藏品）——
+  const io = global.App.io || (require("./js/io.js"), global.App.io);
+  assert(!!io && typeof io.mergeStore === "function", "io 模块可用");
+  const cur = { roles: [], customSets: ["A"], collection: [c1] };
+  const inc = { roles: [{ id: "r1", name: "某人" }], customSets: ["B"], collection: [c2] };
+  const ow = io.mergeStore(cur, inc, "overwrite");
+  assert(ow.collection.length === 1 && ow.collection[0].id === "c2", "mergeStore(overwrite)：藏品跟随导入方");
+  assert(ow.collection[0] !== c2, "mergeStore：藏品为深拷贝（不共享引用）");
+  const mg = io.mergeStore(cur, inc, "merge");
+  assert(mg.collection.length === 1 && mg.collection[0].id === "c1", "mergeStore(merge)：保留当前藏品（藏品无名，不按名合并）");
+  assert(mg.roles.some(r => r.name === "某人"), "mergeStore(merge)：角色仍按名合并（既有行为不变）");
+  const mgNoColl = io.mergeStore({ roles: [], customSets: ["A"] }, inc, "merge");
+  assert(Array.isArray(mgNoColl.collection) && mgNoColl.collection.length === 0,
+    "mergeStore(merge)：current 无 collection 时补空数组");
+}
+
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
 process.exit(fail > 0 ? 1 : 0);

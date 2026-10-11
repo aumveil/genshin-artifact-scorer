@@ -698,6 +698,88 @@ const path = require("path");
     }
   }
 
+  // —— 藏品库（2026-10-11）：顶栏入口 / 页面渲染 / 藏品视角面板 ——
+  {
+    const btnColl = window.document.getElementById("btnCollection");
+    console.log("顶栏「藏品」按钮存在:", btnColl ? "✓" : "✗");
+    if (!btnColl) process.exitCode = 1;
+
+    App.store.getCollection().length = 0;
+    App.store.addCollectionItem({
+      slot: "goblet", set: "炽烈的炎之魔女", mainStat: "火元素伤害加成", level: 20,
+      substats: [
+        { stat: "暴击率", value: 11.7, activated: true },
+        { stat: "暴击伤害", value: 21.8, activated: true },
+        { stat: "攻击力百分比", value: 9.9, activated: true },
+        { stat: "元素精通", value: 44, activated: true }
+      ]
+    });
+    btnColl.click();
+    await new Promise(r => setTimeout(r, 80));
+
+    const titleEl = app.querySelector(".detail-title");
+    const buckets = app.querySelectorAll(".coll-bucket");
+    const dimRows = app.querySelectorAll(".coll-slot .coll-row");
+    const okTitle = !!titleEl && titleEl.textContent === "圣遗物藏品";
+    console.log("藏品页标题:", titleEl ? titleEl.textContent : "(无)", okTitle ? "✓" : "✗");
+    if (!okTitle) process.exitCode = 1;
+    console.log("藏品页桶卡片数（应 26）:", buckets.length, buckets.length === 26 ? "✓" : "✗");
+    if (buckets.length !== 26) process.exitCode = 1;
+    console.log("藏品页维度行总数（应 95）:", dimRows.length, dimRows.length === 95 ? "✓" : "✗");
+    if (dimRows.length !== 95) process.exitCode = 1;
+
+    // 火伤杯 · 双爆：持有值 = 2×11.7 + 21.8 = 45.2；极限度 = 45.2 / 54.6 = 82.8%
+    const critRow = Array.from(app.querySelectorAll('.coll-row[data-bucket="goblet#火元素伤害加成"]'))
+      .find(r => { const d = r.querySelector(".coll-dim"); return d && d.textContent === "双爆"; });
+    const critVal = critRow ? critRow.querySelector(".coll-val").textContent.trim() : null;
+    const critPct = critRow ? critRow.querySelector(".coll-pct").textContent.trim() : null;
+    const critHot = critRow ? critRow.querySelectorAll(".coll-hot").length : 0;
+    const okCrit = critVal === "45.2" && critPct === "82.8%" && critHot === 2;
+    console.log("火伤杯·双爆 持有值/极限度/高亮词条:", critVal, critPct, critHot, okCrit ? "✓" : "✗");
+    if (!okCrit) process.exitCode = 1;
+
+    const critHead = app.querySelectorAll('.coll-row[data-bucket="circlet#暴击率"]').length;
+    console.log("收藏清单含暴击头:", critHead === 6 ? "✓" : "✗", `(${critHead} 行)`);
+    if (critHead !== 6) process.exitCode = 1;
+
+    // 藏品视角面板（评估结果内嵌）：双爆 50.6 > 45.2 → 刷新纪录；充能 5.2 → 新维度
+    const panel = App.ui.buildCollectionPanel({
+      slot: "goblet", set: "炽烈的炎之魔女", mainStat: "火元素伤害加成", level: 20,
+      substats: [
+        { stat: "暴击率", value: 11.7, activated: true },
+        { stat: "暴击伤害", value: 27.2, activated: true },
+        { stat: "元素充能效率", value: 5.2, activated: true },
+        { stat: "元素精通", value: 21, activated: true }
+      ]
+    });
+    const okPanel = panel.textContent.includes("藏品视角（火伤杯）") && panel.textContent.includes("可入藏（刷新纪录");
+    console.log("藏品视角面板:", okPanel ? "✓" : "✗", "|", panel.textContent.replace(/\s+/g, " ").slice(0, 88));
+    if (!okPanel) process.exitCode = 1;
+
+    // 暴击头属收藏桶 → 不应出现「不在藏品收藏范围内」
+    const panelHead = App.ui.buildCollectionPanel({
+      slot: "circlet", set: "X", mainStat: "暴击率", level: 20,
+      substats: [{ stat: "暴击伤害", value: 7.8, activated: true }]
+    });
+    const okHead = !panelHead.textContent.includes("不在藏品收藏范围内");
+    console.log("暴击头属收藏桶:", okHead ? "✓" : "✗");
+    if (!okHead) process.exitCode = 1;
+
+    // 藏品件参与重塑分析（游离件口径：按宿主角色评；无宿主则不列入）
+    window.document.getElementById("btnRemodel").click();
+    await new Promise(r => setTimeout(r, 200));
+    const rmTitle = app.querySelector(".detail-title");
+    const okRm = !!rmTitle && rmTitle.textContent === "圣遗物重塑分析";
+    const rmSum = app.querySelector(".eval-summary");
+    console.log("重塑页渲染（候选含藏品件）:", okRm ? "✓" : "✗", "|",
+      rmSum ? rmSum.textContent.replace(/\s+/g, " ").slice(0, 72) : "");
+    if (!okRm) process.exitCode = 1;
+
+    window.document.getElementById("logoBtn").click();
+    await new Promise(r => setTimeout(r, 40));
+    App.store.getCollection().length = 0;
+  }
+
   console.log("捕获错误:", window.__testErrors.length ? window.__testErrors : "无");
   if (window.__testErrors.length) process.exitCode = 1;
   // 退出码 = 累计断言结果。⚠️ 勿写死 process.exit(0)：那会把上面所有 exitCode = 1 全部吞掉，

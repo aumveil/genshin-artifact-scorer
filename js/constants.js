@@ -219,12 +219,100 @@
   const DUST_COST = { flower: 1, plume: 1, sands: 2, goblet: 2, circlet: 2 };
   const REMODEL_K = { basic: 2, advanced: 3, oracle: 4 };
 
+  // ============ 藏品（未装备圣遗物的收藏库，2026-10-11）============
+  // 详见《圣遗物网页实现方案.md》§七「藏品库」。核心概念：
+  //   桶 = 「部位 + 主词条」；维度 = 6 个收藏维度；位 = 桶 × 维度（一件藏品可同时占据多个位）。
+  // 维度声明它涉及哪些副词条：单条维 1 条；双爆维（crit）涉及两条 → 复合。
+  // 数组顺序 = 界面渲染顺序：**双爆列首**（2026-10-11 用户要求），其余依次 攻击% / 生命% / 防御% / 精通 / 充能。
+  // 单维桶（各沙/杯/头的「仅双爆」）不受影响。
+  const COLLECTION_DIMS = [
+    { key: "crit",   label: "双爆",   stats: ["暴击率", "暴击伤害"], unit: "", crit: true },
+    { key: "atkPct", label: "攻击%", stats: ["攻击力百分比"],       unit: "%" },
+    { key: "hpPct",  label: "生命%", stats: ["生命值百分比"],       unit: "%" },
+    { key: "defPct", label: "防御%", stats: ["防御力百分比"],       unit: "%" },
+    { key: "em",     label: "精通",   stats: ["元素精通"],           unit: "" },
+    { key: "er",     label: "充能",   stats: ["元素充能效率"],       unit: "%" }
+  ];
+  const COLLECTION_DIM_KEYS = COLLECTION_DIMS.map(d => d.key);
+  const COLLECTION_DIM_BY_KEY = {};
+  COLLECTION_DIMS.forEach(d => { COLLECTION_DIM_BY_KEY[d.key] = d; });
+
+  // 桶清单（26 个，用户 2026-10-11 定案）。dims 声明「收录哪些维度」：
+  //   ALL_DIMS   = 全维（6 个，其中主词条冲突的会被 collectionBucketDims 自动剔除）
+  //   CRIT_ONLY  = 仅双爆
+  // 元素杯按元素各 1 桶；含物理杯；含暴击头 / 暴伤头。主词条写法与 MAIN_STATS_BY_SLOT 一致。
+  const ALL_DIMS = COLLECTION_DIM_KEYS.slice();
+  const CRIT_ONLY = ["crit"];
+  const COLLECTION_BUCKETS = [
+    { key: "flower#生命值",         slot: "flower",  mainStat: "生命值",         name: "生之花",             dims: ALL_DIMS },
+    { key: "plume#攻击力",          slot: "plume",   mainStat: "攻击力",         name: "死之羽",             dims: ALL_DIMS },
+    { key: "sands#元素充能效率",    slot: "sands",   mainStat: "元素充能效率",   name: "充能沙",             dims: ALL_DIMS },
+    { key: "sands#攻击力百分比",    slot: "sands",   mainStat: "攻击力百分比",   name: "攻击沙",             dims: CRIT_ONLY },
+    { key: "sands#防御力百分比",    slot: "sands",   mainStat: "防御力百分比",   name: "防御沙",             dims: CRIT_ONLY },
+    { key: "sands#生命值百分比",    slot: "sands",   mainStat: "生命值百分比",   name: "生命沙",             dims: CRIT_ONLY },
+    { key: "sands#元素精通",        slot: "sands",   mainStat: "元素精通",       name: "精通沙",             dims: CRIT_ONLY },
+    { key: "goblet#火元素伤害加成", slot: "goblet",  mainStat: "火元素伤害加成", name: "火伤杯",             dims: ALL_DIMS },
+    { key: "goblet#水元素伤害加成", slot: "goblet",  mainStat: "水元素伤害加成", name: "水伤杯",             dims: ALL_DIMS },
+    { key: "goblet#雷元素伤害加成", slot: "goblet",  mainStat: "雷元素伤害加成", name: "雷伤杯",             dims: ALL_DIMS },
+    { key: "goblet#冰元素伤害加成", slot: "goblet",  mainStat: "冰元素伤害加成", name: "冰伤杯",             dims: ALL_DIMS },
+    { key: "goblet#风元素伤害加成", slot: "goblet",  mainStat: "风元素伤害加成", name: "风伤杯",             dims: ALL_DIMS },
+    { key: "goblet#岩元素伤害加成", slot: "goblet",  mainStat: "岩元素伤害加成", name: "岩伤杯",             dims: ALL_DIMS },
+    { key: "goblet#草元素伤害加成", slot: "goblet",  mainStat: "草元素伤害加成", name: "草伤杯",             dims: ALL_DIMS },
+    { key: "goblet#物理伤害加成",   slot: "goblet",  mainStat: "物理伤害加成",   name: "物伤杯",             dims: ALL_DIMS },
+    { key: "goblet#攻击力百分比",   slot: "goblet",  mainStat: "攻击力百分比",   name: "攻击杯",             dims: CRIT_ONLY },
+    { key: "goblet#防御力百分比",   slot: "goblet",  mainStat: "防御力百分比",   name: "防御杯",             dims: CRIT_ONLY },
+    { key: "goblet#生命值百分比",   slot: "goblet",  mainStat: "生命值百分比",   name: "生命杯",             dims: CRIT_ONLY },
+    { key: "goblet#元素精通",       slot: "goblet",  mainStat: "元素精通",       name: "精通杯",             dims: CRIT_ONLY },
+    { key: "circlet#治疗加成",      slot: "circlet", mainStat: "治疗加成",       name: "治疗头",             dims: ALL_DIMS },
+    { key: "circlet#攻击力百分比",  slot: "circlet", mainStat: "攻击力百分比",   name: "攻击头",             dims: CRIT_ONLY },
+    { key: "circlet#防御力百分比",  slot: "circlet", mainStat: "防御力百分比",   name: "防御头",             dims: CRIT_ONLY },
+    { key: "circlet#生命值百分比",  slot: "circlet", mainStat: "生命值百分比",   name: "生命头",             dims: CRIT_ONLY },
+    { key: "circlet#元素精通",      slot: "circlet", mainStat: "元素精通",       name: "精通头",             dims: CRIT_ONLY },
+    { key: "circlet#暴击率",        slot: "circlet", mainStat: "暴击率",         name: "暴击头",             dims: ALL_DIMS },
+    { key: "circlet#暴击伤害",      slot: "circlet", mainStat: "暴击伤害",       name: "暴伤头",             dims: ALL_DIMS }
+  ];
+  const COLLECTION_BUCKET_BY_KEY = {};
+  COLLECTION_BUCKETS.forEach(b => { COLLECTION_BUCKET_BY_KEY[b.key] = b; });
+
+  /** 桶 key = 「部位#主词条」（藏品件与桶的匹配依据） */
+  function collectionBucketKey(slot, mainStat) { return slot + "#" + mainStat; }
+
+  /**
+   * 该维度在某主词条下的「可用副词条槽数」= 维度涉及词条中不与主词条冲突的条数。
+   * 例：主词条"暴击率" → 双爆维只剩暴击伤害 1 槽（副词条不与主词条重复）。
+   */
+  function collectionUsableSlots(dimKey, mainStat) {
+    const dim = COLLECTION_DIM_BY_KEY[dimKey];
+    if (!dim) return 0;
+    return dim.stats.filter(s => s !== mainStat).length;
+  }
+  /** 单发满挡贡献：双爆 = 7.8（1 发暴击率×2 ≡ 1 发暴击伤害）；单条维 = Umax[词条] */
+  function collectionPerRoll(dimKey) {
+    const dim = COLLECTION_DIM_BY_KEY[dimKey];
+    if (!dim) return 0;
+    return dim.crit ? UMAX["暴击伤害"] : (UMAX[dim.stats[0]] || 0);
+  }
+  /**
+   * 理论满值 = (可用槽数 + 5) × 单发满挡贡献（4 初始口径）。
+   * 单条维：6 × Umax；双爆维一般桶：(2+5)×7.8 = 54.6；暴击头：(1+5)×7.8 = 46.8。
+   */
+  function collectionFull(dimKey, mainStat) {
+    return (collectionUsableSlots(dimKey, mainStat) + 5) * collectionPerRoll(dimKey);
+  }
+  /** 桶实际收录的维度（剔除可用槽数为 0 的，如充能沙的「充能」维） */
+  function collectionBucketDims(bucket) {
+    return (bucket.dims || []).filter(k => collectionUsableSlots(k, bucket.mainStat) > 0);
+  }
+
   global.App = global.App || {};
   global.App.constants = {
     SLOTS, SLOT_KEYS, UMAX, STAT_TYPE, SUB_STATS, MAIN_STATS_BY_SLOT,
     SLOT_ALIASES, STAT_ALIASES, SETS, SET_ALIASES, ROLL_TIERS, DISPLAY_HALF, MAIN_SHORT,
     ELEMENTS, ELEMENT_KEYS, CHARACTER_ELEMENT_HINTS,
     MAX_LEVEL, MAX_ROLLS_PER_STAT, MIN_DIFF, MAX_WEIGHT, STORAGE_VERSION,
-    ROLL_AVG, DUST_COST, REMODEL_K
+    ROLL_AVG, DUST_COST, REMODEL_K,
+    COLLECTION_DIMS, COLLECTION_DIM_KEYS, COLLECTION_DIM_BY_KEY,
+    COLLECTION_BUCKETS, COLLECTION_BUCKET_BY_KEY,
+    collectionBucketKey, collectionUsableSlots, collectionPerRoll, collectionFull, collectionBucketDims
   };
 })(window);

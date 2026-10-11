@@ -995,3 +995,78 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ============================== 17. 藏品库 ============================== */
+/* —— 藏品页：桶卡片 + 四列行（维度 | 值 | 极限度 | 持有件）—— */
+.coll-slot { margin-top: 20px; }
+.coll-slot-title {
+  font-size: var(--fs-xl); color: var(--brand-strong); font-weight: 600;
+  margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line-1);
+}
+.coll-bucket {
+  background: var(--bg-1); border: 1px solid var(--line-1);
+  border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
+}
+.coll-bucket-title { font-size: var(--fs-lg); color: var(--text-1); font-weight: 600; margin-bottom: 8px; }
+
+/* 四列：属性 | 值 | 极限度（吸收剩余宽度） | 持有件
+   持有件内部各元素用固定宽度 → 跨行上下对齐；整块右对齐 → 右端齐平 */
+.coll-rows { display: flex; flex-direction: column; gap: 6px; }
+.coll-row {
+  display: grid;
+  grid-template-columns: 64px 96px minmax(120px, 0.8fr) minmax(0, 1.6fr);
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+.coll-row[data-cid] { cursor: pointer; }
+.coll-row.empty { background: transparent; }
+
+.coll-dim { color: var(--text-2); white-space: nowrap; }
+.coll-val {
+  font-family: var(--font-num); font-size: var(--fs-lg); font-weight: 600;
+  color: var(--brand-strong); text-align: right; letter-spacing: 0.02em; white-space: nowrap;
+}
+.coll-row.empty .coll-val { font-size: var(--fs-sm); font-weight: 400; color: var(--text-3); }
+
+.coll-ex { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.coll-bar {
+  flex: 1 1 auto; min-width: 40px; height: 6px; border-radius: 3px;
+  background: var(--bg-3); overflow: hidden;
+}
+.coll-bar > i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--brand-dim), var(--brand-strong)); }
+/* 极限度百分比 = 重要信息 → 亮色（与「套装」互换配色，2026-10-11） */
+.coll-pct { flex: 0 0 44px; text-align: right; font-family: var(--font-num); font-size: var(--fs-xs); color: var(--text-1); }
+
+/* 持有件：整块右对齐；套装 / 等级 / 4 条副词条各占固定宽度 → 跨行严格上下对齐 */
+.coll-item { display: flex; align-items: baseline; gap: 10px; min-width: 0; width: 100%; justify-content: flex-end; font-size: var(--fs-xs); }
+.coll-set { flex: 0 0 104px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.coll-lv { flex: 0 0 46px; color: var(--text-3); font-family: var(--font-num); }
+.coll-subs { display: flex; gap: 8px; min-width: 0; color: var(--text-3); }
+.coll-subs > * { flex: 0 0 92px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 命中该维度的词条高亮（一眼看出这件靠什么成为极限） */
+.coll-hot { color: var(--brand-strong); font-weight: 600; }
+.coll-cold { color: var(--text-3); }
+.coll-empty { color: var(--text-3); }
+
+/* —— 藏品视角面板（评估结果内嵌，六列）：维度|持有|新件|判定|极限度|潜力 —— */
+.coll-panel .coll-row { grid-template-columns: 52px 78px 78px minmax(0, 1fr) 132px auto; }
+.coll-cur { font-family: var(--font-num); color: var(--text-1); text-align: right; }
+.coll-new { font-family: var(--font-num); text-align: right; }
+.coll-verdict { min-width: 0; }
+.coll-pot { font-size: var(--fs-xs); color: var(--text-2); white-space: nowrap; }
+.coll-add { margin-top: 10px; }
+
+.coll-nav { display: inline-flex; gap: 6px; margin-left: auto; }
+.coll-nav .btn { padding: 4px 10px; font-size: var(--fs-xs); }
+
+@media (max-width: 1000px) {
+  .coll-slot { overflow-x: auto; }
+  .coll-bucket { min-width: 700px; }
+}
+@media (max-width: 768px) {
+  .coll-panel .coll-row { grid-template-columns: 48px 68px 68px minmax(0, 1fr); row-gap: 4px; }
+  .coll-panel .coll-ex, .coll-panel .coll-pot { grid-column: 1 / -1; }
+}

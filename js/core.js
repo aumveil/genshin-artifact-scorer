@@ -577,11 +577,105 @@
     return { checked: true, mismatch: !sameSetComposition(declared, actual), actual };
   }
 
+  // ============ 藏品（未装备圣遗物，2026-10-11）============
+  // 详见《圣遗物网页实现方案.md》§七「藏品库」。桶 = 部位+主词条；维度 6 个；位 = 桶 × 维度（一件可占多位）。
+  /** 某条副词条的累计值（含待激活词条；同一词条仅 1 条，累加为防御式处理） */
+  function statValue(art, stat) {
+    let v = 0;
+    ((art && art.substats) || []).forEach(s => {
+      if (s.stat === stat) v += (Number(s.value) || 0);
+    });
+    return v;
+  }
+
+  /** 维度值：单条维 = 该词条副词条值；双爆维 = 2 × 暴击率 + 暴击伤害 */
+  function dimValue(art, dimKey) {
+    const dim = C.COLLECTION_DIM_BY_KEY[dimKey];
+    if (!art || !dim) return 0;
+    if (dim.crit) return 2 * statValue(art, "暴击率") + statValue(art, "暴击伤害");
+    return statValue(art, dim.stats[0]);
+  }
+
+  /** 维度理论满值（按该件主词条的可用槽数）；暴击头之类的单支情形由 constants 统一处理 */
+  function dimFull(dimKey, mainStat) { return C.collectionFull(dimKey, mainStat); }
+
+  /** 该件所属藏品桶（不属于 26 桶则 null） */
+  function collectionBucketOf(art) {
+    if (!art || !art.slot || !art.mainStat) return null;
+    return C.COLLECTION_BUCKET_BY_KEY[C.collectionBucketKey(art.slot, art.mainStat)] || null;
+  }
+
+  /**
+   * 藏品索引：位（桶 × 维度）→ 持有者（该位值最大者，并列全部计为持有者）；
+   * 并派生「冗余件」= 不占任何位的件（被完全取代）→ 由 store 层删除。
+   * 浮点比较统一 ×100 整数化（否则 0.1+0.2 类尾差会把「并列」误判为不等）。
+   */
+  function collectionIndex(collection) {
+    const list = Array.isArray(collection) ? collection : [];
+    const holders = new Map();                 // posKey → { bucketKey, bucket, dimKey, value, ivalue, arts }
+    list.forEach(art => {
+      const bucket = collectionBucketOf(art);
+      if (!bucket) return;
+      C.collectionBucketDims(bucket).forEach(dimKey => {
+        const v = dimValue(art, dimKey);
+        if (!(v > 0)) return;                  // 该件没有这一维 → 不占位
+        const posKey = bucket.key + "|" + dimKey;
+        const iv = Math.round(v * 100);
+        let h = holders.get(posKey);
+        if (!h) { h = { posKey, bucketKey: bucket.key, bucket, dimKey, value: v, ivalue: iv, arts: [] }; holders.set(posKey, h); }
+        if (iv > h.ivalue) { h.value = v; h.ivalue = iv; h.arts = [art]; }
+        else if (iv === h.ivalue) h.arts.push(art);
+      });
+    });
+    const holding = new Set();
+    holders.forEach(h => h.arts.forEach(a => holding.add(a)));
+    return { holders, redundant: list.filter(a => !holding.has(a)) };
+  }
+
+  /**
+   * 藏品视角分析（新件 X vs 藏品库）——功能 (a) 入藏判定 / (c) 极限程度 / (d) 潜力。
+   * 功能 (b) 择优由「入库 + collectionIndex 重算 + 删除冗余件」实现（见 store.addCollectionItem）。
+   * @returns {Object} { inScope, bucket, rows: [{ dimKey, label, unit, value, cur, delta, full, ratio,
+   *                    verdict, holder, potential, potentialDelta, canExceed }] }
+   *   verdict：new（可入藏·新维度）| better（可入藏·刷新纪录）| worse（未超过）| none（该维为空且新件也没有）
+   */
+  function analyzeCollection(newArtifact, collection) {
+    const bucket = collectionBucketOf(newArtifact);
+    if (!bucket) return { inScope: false, bucket: null, rows: [] };
+    const { holders } = collectionIndex(collection);
+    const rem = remaining(newArtifact.level);
+    const rows = C.collectionBucketDims(bucket).map(dimKey => {
+      const dim = C.COLLECTION_DIM_BY_KEY[dimKey];
+      const v = dimValue(newArtifact, dimKey);
+      const h = holders.get(bucket.key + "|" + dimKey) || null;
+      const cur = h ? h.value : null;
+      const full = C.collectionFull(dimKey, newArtifact.mainStat);
+      let verdict;
+      if (cur == null) verdict = v > 0 ? "new" : "none";
+      else if (Math.round(v * 100) > Math.round(cur * 100)) verdict = "better";
+      else verdict = "worse";
+      // (d) 潜力：乐观上限，且只有「该件已有该维度词条」才吃得到强化（强化不新增词条种类）
+      const hasDim = dim.stats.some(s => statValue(newArtifact, s) > 0);
+      const potential = v + (hasDim ? rem * C.collectionPerRoll(dimKey) : 0);
+      return {
+        dimKey, label: dim.label, unit: dim.unit || "",
+        value: v, cur, delta: cur == null ? null : v - cur,
+        full, ratio: full > 0 ? v / full : 0,
+        verdict, holder: h ? h.arts[0] : null,
+        potential, potentialDelta: cur == null ? null : potential - cur,
+        canExceed: cur != null && Math.round(potential * 100) > Math.round(cur * 100)
+      };
+    });
+    return { inScope: true, bucket, rows };
+  }
+
   global.App.core = {
     calcArtifactScore, calcPerfect, calcEnergyPenalty, calcCharacterScore,
     maxW, remaining, ERContrib, evaluateAgainst, evaluateArtifact, freeSlots,
     expectedHits, calcRemodel, remodelSignature, inferInitialCount, collectRemodelCandidates, wearsSet, remodelTargets, analyzeRemodel,
     // 角色套装字段（2026-10-09）
-    isFullyRecorded, roleSets, hasSetInfo, isSetPiece, deriveSetsFromArtifacts, sameSetComposition, checkSetConsistency
+    isFullyRecorded, roleSets, hasSetInfo, isSetPiece, deriveSetsFromArtifacts, sameSetComposition, checkSetConsistency,
+    // 藏品（2026-10-11）
+    statValue, dimValue, dimFull, collectionBucketOf, collectionIndex, analyzeCollection
   };
 })(window);

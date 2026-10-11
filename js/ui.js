@@ -79,6 +79,10 @@
       app.appendChild(renderRemodelView());
       return;
     }
+    if (view.type === "collection") {
+      app.appendChild(renderCollectionView());
+      return;
+    }
     if (roles.length === 0) {
       const empty = el("div", "empty",
         '<div class="icon" aria-hidden="true">🏺</div>' +
@@ -562,8 +566,12 @@
 
   // ============ 圣遗物录入弹窗（双模式）============
   function openArtifactModal(role, slot, mode, prefill) {
-    // mode: 'edit' 编辑已穿戴件（slot 锁定） | 'new' 录入新圣遗物（临时对象 → 评估） | 'remodel' 录入重塑分析新件（临时对象 → 重塑分析）
+    // mode: 'edit' 编辑已穿戴件（slot 锁定） | 'new' 录入新圣遗物（临时对象 → 评估）
+    //     | 'remodel' 录入重塑分析新件（临时对象 → 重塑分析）
+    //     | 'collection' 录入藏品件 | 'collectionEdit' 编辑藏品件（两者都写藏品库）
     const isEdit = mode === "edit";
+    const isColl = mode === "collection" || mode === "collectionEdit";
+    const isCollEdit = mode === "collectionEdit";
     const isNew = mode === "new" || mode === "remodel";
     const isRemodel = mode === "remodel";
     let formState = {
@@ -587,6 +595,14 @@
       };
       // 补齐 4 行
       while (formState.substats.length < 4) formState.substats.push({ stat: "", value: "", activated: true });
+    } else if (isCollEdit && prefill) {
+      // 编辑藏品件：从藏品对象回填
+      const a = prefill;
+      formState = {
+        slot: a.slot, set: a.set, mainStat: a.mainStat, level: a.level,
+        substats: (a.substats || []).map(s => ({ stat: s.stat, value: s.value, activated: s.activated }))
+      };
+      while (formState.substats.length < 4) formState.substats.push({ stat: "", value: "", activated: true });
     } else if (isNew && prefill) {
       // prefill 支持：true（取角色该部位已穿戴件）或圣遗物对象（如评估中的临时对象，修改时回填）
       const a = (typeof prefill === "object" && prefill) ? prefill : (role.artifacts && role.artifacts[slot]);
@@ -602,7 +618,9 @@
     let currentMode = "text"; // 'text' | 'manual'
     const body = el("div");
     const title = isEdit ? `编辑 ${C.SLOTS[slot].name}`
-      : (isRemodel ? "录入要分析的新圣遗物（满级）" : "录入新圣遗物");
+      : (isCollEdit ? "编辑藏品"
+        : (isColl ? "录入藏品"
+          : (isRemodel ? "录入要分析的新圣遗物（满级）" : "录入新圣遗物")));
 
     // 模式切换 tabs
     const tabs = el("div", "mode-tabs",
@@ -846,7 +864,8 @@
     const foot = el("div");
     const btnClear = el("button", "btn", "清空");
     const btnCancel = el("button", "btn", "取消");
-    const btnSave = el("button", "btn btn-primary", isEdit ? "保存" : (isRemodel ? "保存并分析" : "保存并评估"));
+    const btnSave = el("button", "btn btn-primary", isEdit ? "保存"
+      : (isColl ? "存入藏品库" : (isRemodel ? "保存并分析" : "保存并评估")));
     btnClear.addEventListener("click", resetForm);
     btnCancel.addEventListener("click", closeModal);
     btnSave.addEventListener("click", () => {
@@ -863,7 +882,17 @@
         });
         return;
       }
-      if (isRemodel) {
+      if (isColl) {
+        // 藏品件：写入藏品库（store 内自动清理「被完全取代」的旧件）
+        if (isCollEdit && prefill && prefill.id) artifact.id = prefill.id;
+        const r = isCollEdit ? store.updateCollectionItem(artifact) : store.addCollectionItem(artifact);
+        const removed = ((r && r.removed) || []).length;
+        closeModal();
+        if (view.type !== "collection") view = { type: "collection" };
+        render();
+        feedback.toast((isCollEdit ? "已更新藏品" : "已存入藏品库") +
+          (removed ? `；${removed} 件旧藏品被完全取代，已移除` : ""), "success");
+      } else if (isRemodel) {
         // 重塑分析新件：仅满级（算法四评估域）→ 会话内临时列表（不落盘）
         if (artifact.level < C.MAX_LEVEL) {
           feedback.info({
@@ -901,7 +930,28 @@
         }
       }
     });
-    foot.append(btnClear, btnCancel, btnSave);
+    foot.append(btnClear, btnCancel);
+    // 编辑藏品时提供「删除藏品」入口（删除仅在此处开放）
+    if (isCollEdit && prefill && prefill.id) {
+      const btnDel = el("button", "btn", "删除藏品");
+      btnDel.addEventListener("click", () => {
+        feedback.confirm({
+          title: "删除藏品",
+          message: "确定从藏品库删除这件圣遗物吗？",
+          detail: "删除后不可恢复；它占据的维度位将由库中次优件接替。",
+          confirmText: "删除",
+          danger: true
+        }).then(ok => {
+          if (!ok) return;
+          store.removeCollectionItem(prefill.id);
+          closeModal();
+          render();
+          feedback.toast("已删除藏品", "success");
+        });
+      });
+      foot.appendChild(btnDel);
+    }
+    foot.appendChild(btnSave);
 
     const open = openModal(title, (function () {
       const w = el("div");
@@ -981,6 +1031,9 @@
         `</div>`;
       box.appendChild(card);
     });
+
+    // 藏品视角：未装备件收藏比对（入藏判定 / 极限程度 / 潜力）
+    box.appendChild(buildCollectionPanel(art));
 
     return { box, res };
   }
@@ -1104,6 +1157,9 @@
 
     // 新件摘要（一行主信息 + 一行副词条）
     wrap.appendChild(renderPendingCard(art, () => openArtifactModal(roles[0], art.slot, "new", pendingArtifact)));
+
+    // 藏品视角（未装备件收藏比对，与角色结论并列的另一套口径）
+    wrap.appendChild(buildCollectionPanel(art));
 
     // 汇总
     const sum = el("div", "eval-summary " + (valuable.length ? "valuable" : "no-value"));
@@ -1405,12 +1461,19 @@
     wrap.appendChild(el("div", "info",
       "RV = 重塑后期望分 − 功能位现状分，> 0 表示值得花尘尝试（期望 ≠ 保证，结果可预览）。三情况开关任意组合，关闭的类型不参与评估；散件不评自身，新录入件按游离件评估。"));
 
-    // 候选 = 会话内新录入件（优先）+ 全角色已穿戴满级件（按签名去重）
+    // 候选 = 会话内新录入件（优先）+ 藏品件 + 全角色已穿戴满级件（按签名去重）
+    // 藏品件按「游离件」（sourceRole = null）参与：只能作为套装件转移给宿主（情况三 promote），
+    // 权值取宿主角色 —— 与「新录入游离件」完全同口径（详见《圣遗物网页实现方案.md》§七）。
     const allCands = [];
     const seenSig = new Set();
+    let collCandCount = 0;
     remodelTempList.forEach(a => {
       const sig = core.remodelSignature(a);
       if (!seenSig.has(sig)) { seenSig.add(sig); allCands.push({ artifact: a, sourceRole: null, signature: sig }); }
+    });
+    store.getCollection().forEach(a => {
+      const sig = core.remodelSignature(a);
+      if (!seenSig.has(sig)) { seenSig.add(sig); allCands.push({ artifact: a, sourceRole: null, signature: sig }); collCandCount++; }
     });
     core.collectRemodelCandidates(roles).forEach(c => {
       if (!seenSig.has(c.signature)) { seenSig.add(c.signature); allCands.push(c); }
@@ -1426,8 +1489,8 @@
 
     const sum = el("div", "eval-summary " + (worth.length ? "valuable" : "no-case"));
     sum.textContent = kindsOn.length
-      ? `✓ 扫描 ${allCands.length} 件满级圣遗物（含新录入 ${remodelTempList.length} 件）：${worth.length} 件有重塑价值（RV > 0）` +
-        (excluded ? `；${excluded} 件无可评估对象未列入（散件无宿主等）` : "")
+      ? `✓ 扫描 ${allCands.length} 件满级圣遗物（含新录入 ${remodelTempList.length} 件${collCandCount ? ` · 藏品 ${collCandCount} 件` : ""}）：${worth.length} 件有重塑价值（RV > 0）` +
+        (excluded ? `；${excluded} 件无可评估对象未列入（散件/藏品无宿主等）` : "")
       : "⚠ 三种情况类型均已关闭：无行动可评估，请至少开启一种（原地强化 / 同套转移 / 晋升套装件）。";
     wrap.appendChild(sum);
 
@@ -1440,6 +1503,172 @@
     } else {
       shown.forEach(row => wrap.appendChild(buildRemodelCard(row)));
     }
+    return wrap;
+  }
+
+  // ============ 藏品库（未装备圣遗物的极限单件收藏，2026-10-11）============
+  // 详见《圣遗物网页实现方案.md》§七「藏品库」。桶 = 部位+主词条（26 个）；维度 6 个；一件藏品可同时占多个位。
+
+  /** 维度值格式化：百分比维补 %；保留 1 位小数 */
+  function collVal(v, unit) {
+    if (!Number.isFinite(v)) return "-";
+    return (Math.round(v * 10) / 10).toString() + (unit || "");
+  }
+
+  /** 极限程度（当前值 ÷ 理论满值）→ 进度条 + 百分比 */
+  function collRatioBar(ratio) {
+    const pct = Math.max(0, Math.min(1, ratio || 0)) * 100;
+    return `<span class="coll-bar" title="占理论满值 ${pct.toFixed(1)}%"><i style="width:${pct.toFixed(1)}%"></i></span>` +
+      `<span class="coll-pct">${pct.toFixed(1)}%</span>`;
+  }
+
+  /**
+   * 藏品件摘要：套装 · Lv · 副词条（一行）。主词条由表格首列（rowspan 合并单元格）承担。
+   * @param dimKey 该行对应的维度 —— 命中该维度的副词条高亮，一眼看出「这件靠什么成为极限」。
+   */
+  function collItemSummary(art, dimKey) {
+    if (!art) return "";
+    const hot = (C.COLLECTION_DIM_BY_KEY[dimKey] || {}).stats || [];
+    // 副词条按固定词条序排列（SUB_STATS）——各行同一位置是同种词条，跨行可横向对照
+    const rank = st => { const i = C.SUB_STATS.indexOf(st); return i < 0 ? 99 : i; };
+    const plain = [];
+    const subs = (art.substats || []).slice()
+      .sort((a, b) => rank(a.stat) - rank(b.stat))
+      .map(s => {
+        const txt = `${C.MAIN_SHORT[s.stat] || s.stat} ${s.value}${C.STAT_TYPE[s.stat] === "percent" ? "%" : ""}${s.activated === false ? "(待激活)" : ""}`;
+        plain.push(txt);
+        return hot.includes(s.stat)
+          ? `<b class="coll-hot">${esc(txt)}</b>`
+          : `<span class="coll-cold">${esc(txt)}</span>`;
+      }).join("");
+    return `<span class="coll-set" title="${esc(art.set || "")}">${esc(art.set || "（未填套装）")}</span>` +
+      `<span class="coll-lv">Lv.${art.level}</span>` +
+      `<span class="coll-subs" title="${esc(plain.join(" · "))}">${subs}</span>`;
+  }
+
+  /**
+   * 藏品视角面板（评估弹窗 / 独立评估页共用）：功能 (a) 入藏判定 / (c) 极限程度 / (d) 潜力。
+   * 功能 (b) 择优 = 入库后由 store 自动删除「被完全取代」的旧件。
+   */
+  function buildCollectionPanel(art) {
+    const box = el("div", "eval-case coll-panel");
+    const res = core.analyzeCollection(art, store.getCollection());
+    if (!res.inScope) {
+      box.innerHTML = `<div class="c-head"><span class="c-title">藏品视角</span></div>` +
+        `<div class="info">该件（${esc(C.SLOTS[art.slot].name)} · ${esc(art.mainStat || "主词条未填")}）不在藏品收藏范围内` +
+        `（未列入 26 个收藏桶），故不参与藏品比对。</div>`;
+      return box;
+    }
+    const hit = res.rows.filter(r => r.verdict === "better" || r.verdict === "new").length;
+    box.innerHTML =
+      `<div class="c-head"><span class="c-title">藏品视角（${esc(res.bucket.name)}）</span>` +
+      `<span class="badge ${hit ? "badge-green" : "badge-gray"}">${hit ? `可入藏 ${hit} 项` : "不可入藏"}</span></div>` +
+      `<div class="coll-rows">` + res.rows.map(r => {
+        let verdictHtml;
+        if (r.verdict === "new") verdictHtml = `<span class="badge badge-green">可入藏（新维度）</span>`;
+        else if (r.verdict === "better") verdictHtml = `<span class="badge badge-green">可入藏（刷新纪录 +${fmt(r.delta)}）</span>`;
+        else if (r.verdict === "none") verdictHtml = `<span class="badge badge-gray">无此词条</span>`;
+        else verdictHtml = `<span class="badge badge-gray">未超过（${fmt(r.delta)}）</span>`;
+        const potHtml = (r.cur != null && art.level < C.MAX_LEVEL)
+          ? `<span class="coll-pot${r.canExceed ? " diff-pos" : ""}">潜力 ${collVal(r.potential, r.unit)}` +
+            `${r.canExceed ? " · 满级后可能刷新" : ""}</span>`
+          : "";
+        return `<div class="coll-row">` +
+          `<span class="coll-dim">${esc(r.label)}</span>` +
+          `<span class="coll-cur">${r.cur == null ? '<span class="coll-empty">未收藏</span>' : collVal(r.cur, r.unit)}</span>` +
+          `<span class="coll-new ${r.verdict === "worse" ? "diff-neg" : "diff-pos"}">${collVal(r.value, r.unit)}</span>` +
+          `<span class="coll-verdict">${verdictHtml}</span>` +
+          `<span class="coll-ex">${collRatioBar(r.ratio)}</span>` +
+          potHtml +
+          `</div>`;
+      }).join("") + `</div>`;
+
+    if (hit) {
+      const btn = el("button", "btn btn-primary btn-sm coll-add", "存入藏品库");
+      btn.addEventListener("click", () => {
+        const r = store.addCollectionItem(art);
+        const removed = ((r && r.removed) || []).length;
+        pendingArtifact = null;
+        closeModal();
+        if (view.type === "evaluate") render();
+        else { view = { type: "collection" }; render(); }
+        feedback.toast("已存入藏品库" + (removed ? `；${removed} 件旧藏品被完全取代，已移除` : ""), "success");
+      });
+      box.appendChild(btn);
+    }
+    return box;
+  }
+
+  /** 藏品页：按部位 → 桶 → 维度，展示每位「当前持有件」与极限程度（严格四列对齐） */
+  function renderCollectionView() {
+    const wrap = el("div");
+    const head = el("div", "detail-head");
+    head.appendChild(el("div", "detail-title", "圣遗物藏品"));
+    wrap.appendChild(head);
+    wrap.appendChild(el("div", "info",
+      "藏品库保存未装备给任何角色的圣遗物：按「部位 + 主词条」分桶，每个桶内按 6 个维度各收藏一件最大值。" +
+      "藏品件不参与角色评分，但会参与价值评估的「藏品视角」与重塑分析。"));
+
+    const ctrl = el("div", "filter-bar");
+    const btnNew = el("button", "btn btn-primary", "＋ 录入藏品");
+    btnNew.addEventListener("click", () => openArtifactModal(null, null, "collection"));
+    // 部位快速跳转（26 桶铺开来很长，靠它直达到部位）
+    const nav = el("div", "coll-nav");
+    C.SLOT_KEYS.forEach(k => {
+      const b = el("button", "btn btn-sm", C.SLOTS[k].name);
+      b.addEventListener("click", () => {
+        const target = document.querySelector(`.coll-slot[data-slot="${k}"]`);
+        if (target) { target.scrollIntoView({ block: "start" }); window.scrollBy(0, -72); }
+      });
+      nav.appendChild(b);
+    });
+    ctrl.append(btnNew, nav);
+    wrap.appendChild(ctrl);
+
+    const collection = store.getCollection();
+    const { holders } = core.collectionIndex(collection);
+
+    C.SLOT_KEYS.forEach(slot => {
+      const buckets = C.COLLECTION_BUCKETS.filter(b => b.slot === slot);
+      if (!buckets.length) return;
+      const sec = el("div", "coll-slot");
+      sec.dataset.slot = slot;
+      sec.appendChild(el("div", "coll-slot-title", C.SLOTS[slot].name));
+      // 桶卡片 + 四列行（维度 | 值 | 极限度 | 持有件）——回退合并单元格方案
+      buckets.forEach(b => {
+        const dims = C.collectionBucketDims(b);
+        const card = el("div", "coll-bucket");
+        card.appendChild(el("div", "coll-bucket-title", esc(b.name)));
+        const rows = el("div", "coll-rows");
+        dims.forEach(dimKey => {
+          const dim = C.COLLECTION_DIM_BY_KEY[dimKey];
+          const h = holders.get(b.key + "|" + dimKey) || null;
+          const full = C.collectionFull(dimKey, b.mainStat);
+          const row = el("div", "coll-row" + (h ? "" : " empty"));
+          row.dataset.bucket = b.key;   // 供测试 / 调试定位该行属于哪个桶
+          row.innerHTML =
+            `<span class="coll-dim">${esc(dim.label)}</span>` +
+            `<span class="coll-val">${h ? collVal(h.value, dim.unit) : "—"}</span>` +
+            `<span class="coll-ex">${h ? collRatioBar(h.value / full) : ""}</span>` +
+            `<span class="coll-item">${h ? collItemSummary(h.arts[0], dimKey) : '<span class="coll-empty">未收藏</span>'}</span>`;
+          if (h) {
+            row.dataset.cid = h.arts[0].id;
+            row.title = "点击编辑这件藏品";
+          }
+          rows.appendChild(row);
+        });
+        card.appendChild(rows);
+        sec.appendChild(card);
+      });
+      // 事件委托：每个部位区块只挂 1 个 click（避免 95×4 个监听器）
+      sec.addEventListener("click", e => {
+        const row = e.target.closest("[data-cid]");
+        if (!row) return;
+        const item = store.getCollection().find(i => i.id === row.dataset.cid);
+        if (item) openArtifactModal(null, null, "collectionEdit", item);
+      });
+      wrap.appendChild(sec);
+    });
     return wrap;
   }
 
@@ -1626,12 +1855,13 @@
         store.replaceStore(merged);
 
         // 展示导入统计与警告（外部适配器元信息）
-        let html = `<div class="info-success">导入成功（${merged.roles.length} 个角色）</div>`;
+        let html = `<div class="info-success">导入成功（${merged.roles.length} 个角色`
+          + `${merged.collection && merged.collection.length ? ` · 藏品 ${merged.collection.length} 件` : ""}）</div>`;
         const meta = res.meta;
         if (meta) {
           const lines = [];
           if (meta.equipped !== undefined) lines.push(`已导入 ${meta.equipped} 件已装备圣遗物`);
-          if (meta.bag) lines.push(`背包中 ${meta.bag} 件未装备圣遗物未导入（本工具暂不支持背包）`);
+          if (meta.bag) lines.push(`备份中有 ${meta.bag} 件未装备圣遗物未自动导入；如需收藏，可在「藏品」页手动录入`);
           const warns = (meta.warnings || []).slice(0, 8);
           if (warns.length) lines.push("提示：\n" + warns.map(w => "· " + w).join("\n"));
           if (warns.length > 8) lines.push(`…另有 ${meta.warnings.length - 8} 条`);
@@ -1660,6 +1890,11 @@
       render();
     });
 
+    $("#btnCollection").addEventListener("click", () => {
+      view = { type: "collection" };
+      render();
+    });
+
     $("#logoBtn").addEventListener("click", () => {
       view = { type: "list" };
       render();
@@ -1675,5 +1910,5 @@
   }
 
   global.App = global.App || {};
-  global.App.ui = { render, setupIO, openRoleConfigModal, openArtifactModal, openEvaluateModal };
+  global.App.ui = { render, setupIO, openRoleConfigModal, openArtifactModal, openEvaluateModal, renderCollectionView, buildCollectionPanel };
 })(window);

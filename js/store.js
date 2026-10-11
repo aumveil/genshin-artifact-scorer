@@ -1,6 +1,6 @@
 /**
  * store.js - 状态层（对应《圣遗物网页实现方案.md》2.5/阶段5）
- * 角色 CRUD、当前角色切换；每次变更后自动持久化。
+ * 角色 CRUD、当前角色切换、藏品库 CRUD；每次变更后自动持久化。
  * 全局命名空间：App.store
  */
 (function (global) {
@@ -131,12 +131,75 @@
     return { ok: true, erFrom, erTo, erDelta, mainStatChanged, erMainStatTouched };
   }
 
-  /** 覆盖整个 store（导入用） */
+  // ============ 藏品库（未装备给任何角色的圣遗物，2026-10-11）============
+  // 语义（用户定案）：一件藏品可同时占据多个「位」（桶 × 维度）；
+  //   被新件顶掉某一位后，若它仍占着别的位则保留，**只有不再占据任何位才删除**。
+  // 详见《圣遗物网页实现方案.md》§七「藏品库」。
+
+  /** 藏品库（始终返回数组；旧数据缺字段时补空数组） */
+  function getCollection() {
+    if (!Array.isArray(state.store.collection)) state.store.collection = [];
+    return state.store.collection;
+  }
+
+  /**
+   * 删除「被完全取代」的藏品件（core.collectionIndex 的冗余件）。
+   * @param keep 本次操作涉及的件（新入库 / 刚更新）——即使它暂时不占任何位也不删它
+   *             （用户主动收藏的件不该被系统悄悄丢掉）
+   * @returns {Array} 被删除的件（供 UI 提示）
+   */
+  function pruneCollection(keep) {
+    const list = getCollection();
+    if (list.length < 2) return [];
+    const core = global.App.core;
+    if (!core || typeof core.collectionIndex !== "function") return [];
+    const { redundant } = core.collectionIndex(list);
+    const dead = redundant.filter(a => a !== keep);
+    if (!dead.length) return [];
+    const deadSet = new Set(dead);
+    state.store.collection = list.filter(a => !deadSet.has(a));
+    return dead;
+  }
+
+  /** 加入藏品库（深拷贝 + 生成 id）→ 自动清理被完全取代的旧件 → 落盘 */
+  function addCollectionItem(artifact) {
+    const item = JSON.parse(JSON.stringify(artifact));
+    if (!item.id) item.id = genId();
+    getCollection().push(item);
+    const removed = pruneCollection(item);
+    save();
+    return { ok: true, item, removed };
+  }
+
+  /** 更新藏品件（按 id 整体替换）→ 自动清理 → 落盘 */
+  function updateCollectionItem(item) {
+    const list = getCollection();
+    const idx = list.findIndex(a => a.id === item.id);
+    if (idx < 0) return { ok: false };
+    const next = JSON.parse(JSON.stringify(item));
+    list[idx] = next;
+    const removed = pruneCollection(next);
+    save();
+    return { ok: true, item: next, removed };
+  }
+
+  /** 删除藏品件（藏品页手动删除；不触发连带清理） */
+  function removeCollectionItem(id) {
+    const list = getCollection();
+    const idx = list.findIndex(a => a.id === id);
+    if (idx < 0) return false;
+    list.splice(idx, 1);
+    save();
+    return true;
+  }
+
+  /** 覆盖整个 store（导入用）；collection 必须透传 */
   function replaceStore(store) {
     state.store = {
       version: 1, exportedAt: null,
       roles: store.roles || [],
-      customSets: Array.isArray(store.customSets) ? store.customSets : []
+      customSets: Array.isArray(store.customSets) ? store.customSets : [],
+      collection: Array.isArray(store.collection) ? store.collection : []
     };
     state.currentRoleId = null;
     save();
@@ -155,6 +218,8 @@
     getStore, getRoles, getCustomSets, addCustomSet,
     getCurrentRole, setCurrentRole,
     newRole, getRole, updateRole, deleteRole,
-    replaceArtifact, replaceStore, upsertRole, genId, save
+    replaceArtifact, replaceStore, upsertRole, genId, save,
+    // 藏品库（2026-10-11）
+    getCollection, addCollectionItem, updateCollectionItem, removeCollectionItem, pruneCollection
   };
 })(window);
