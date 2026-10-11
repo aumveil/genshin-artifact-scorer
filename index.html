@@ -3,11 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#131019">
+  <meta name="theme-color" content="#000000">
   <meta name="description" content="原神圣遗物配置与评分工具：保存/计算各角色圣遗物，评估新圣遗物的替换与强化价值。">
   <title>圣遗物评分</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23131019'/%3E%3Cpath d='M16 6l2.4 6.1L25 13.2l-5 4.1 1.5 6.7L16 20.4l-5.5 3.6L12 17.3l-5-4.1 6.6-1.1z' fill='%23d9b64a'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23000000'/%3E%3Cpath d='M16 6l2.4 6.1L25 13.2l-5 4.1 1.5 6.7L16 20.4l-5.5 3.6L12 17.3l-5-4.1 6.6-1.1z' fill='%23e8c46a'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css">
+  <!-- 外观：首屏渲染前套用已保存的选择，避免闪烁（随 js/appearance.js 一起可删） -->
+  <script>
+    (function () { try {
+      if (localStorage.getItem("gys_appearance_v1") === "light")
+        document.documentElement.setAttribute("data-appearance", "light");
+    } catch (e) {} })();
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -23,6 +30,8 @@
         <button class="btn btn-primary" id="btnNewRole">＋ 新建角色</button>
         <button class="btn" id="btnImport" title="导入备份或外部数据">⇪ 导入</button>
         <button class="btn" id="btnExport" title="导出完整数据备份">⇩ 导出</button>
+        <!-- 外观切换（深+金 ⇄ 浅+蓝）；纯图标无文字，随 js/appearance.js 一起可删 -->
+        <button class="appearance-toggle" id="appearanceToggle" type="button" aria-pressed="false" title="切换外观">☾</button>
       </div>
     </div>
   </header>
@@ -44,5 +53,7 @@
   <script src="js/store.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/main.js"></script>
+  <!-- 外观切换开关（深+金 ⇄ 浅+蓝；临时工具，选定后连同 style.css 末节与本行一起删除） -->
+  <script src="js/appearance.js"></script>
 </body>
 </html>
