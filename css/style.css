@@ -1041,12 +1041,26 @@ body { background: var(--bg-0); }
 .coll-cold { color: var(--text-3); }
 .coll-empty { color: var(--text-3); }
 
-/* —— 藏品视角面板（评估结果内嵌，六列）：维度|持有|新件|判定|极限度|潜力 —— */
-.coll-panel .coll-row { grid-template-columns: 52px 78px 78px minmax(0, 1fr) 132px auto; }
+/* —— 藏品视角面板（评估结果内嵌，2026-10-13）：副词条|藏品值|新件值|满级最值|藏品%|满级最值%
+      —— 值组 3 列固定 88px（组内紧凑）+ 弹性间隔带（组间分隔）+ 百分比组 2 列（进度条 + 数字，弹性，组内 16px 间隔）；
+         数字统一字号（= 行字号）；满级最值两列数字绿色；各值 / 进度条均带 title 悬停提示 —— */
+.coll-panel .coll-row {
+  grid-template-columns: 52px 88px 88px 88px minmax(24px, 1.3fr) minmax(0, 1.35fr) 8px minmax(0, 1.35fr);
+  column-gap: 4px;
+}
+.coll-panel .coll-dim { grid-column: 1; }
+.coll-panel .coll-cur { grid-column: 2; }
+.coll-panel .coll-new { grid-column: 3; }
+.coll-panel .coll-max { grid-column: 4; }
+.coll-panel .coll-curpct { grid-column: 6; }
+.coll-panel .coll-maxpct { grid-column: 8; }
 .coll-cur { font-family: var(--font-num); color: var(--text-1); text-align: right; }
 .coll-new { font-family: var(--font-num); text-align: right; }
-.coll-verdict { min-width: 0; }
-.coll-pot { font-size: var(--fs-xs); color: var(--text-2); white-space: nowrap; }
+.coll-max { font-family: var(--font-num); color: var(--green); text-align: right; }
+.coll-curpct, .coll-maxpct { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.coll-panel .coll-curpct .coll-bar, .coll-panel .coll-maxpct .coll-bar { min-width: 12px; }
+.coll-panel .coll-curpct .coll-pct, .coll-panel .coll-maxpct .coll-pct { flex: 0 0 auto; font-size: inherit; }
+.coll-panel .coll-maxpct .coll-pct { color: var(--green); }
 .coll-add { margin-top: 10px; }
 
 .coll-nav { display: inline-flex; gap: 6px; margin-left: auto; }
@@ -1057,8 +1071,12 @@ body { background: var(--bg-0); }
   .coll-bucket { min-width: 700px; }
 }
 @media (max-width: 768px) {
-  .coll-panel .coll-row { grid-template-columns: 48px 68px 68px minmax(0, 1fr); row-gap: 4px; }
-  .coll-panel .coll-ex, .coll-panel .coll-pot { grid-column: 1 / -1; }
+  .coll-panel .coll-row {
+    grid-template-columns: 44px minmax(36px, 42px) minmax(36px, 42px) minmax(36px, 42px) minmax(6px, 0.8fr) minmax(0, 1fr) 6px minmax(0, 1fr);
+    column-gap: 3px;
+    font-size: 11px;
+  }
+  .coll-panel .coll-curpct .coll-bar, .coll-panel .coll-maxpct .coll-bar { display: none; }
 }
 
 

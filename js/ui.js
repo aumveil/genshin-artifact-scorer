@@ -1515,11 +1515,15 @@
     return (Math.round(v * 10) / 10).toString() + (unit || "");
   }
 
-  /** 极限程度（当前值 ÷ 理论满值）→ 进度条 + 百分比 */
-  function collRatioBar(ratio) {
+  /**
+   * 极限程度（当前值 ÷ 理论满值）→ 进度条 + 百分比（条与数字均带悬停提示）。
+   * @param ratio 0~1（越界自动截断）；@param tip 可选自定义提示，缺省「占理论满值 X%」（藏品页沿用缺省）
+   */
+  function collRatioBar(ratio, tip) {
     const pct = Math.max(0, Math.min(1, ratio || 0)) * 100;
-    return `<span class="coll-bar" title="占理论满值 ${pct.toFixed(1)}%"><i style="width:${pct.toFixed(1)}%"></i></span>` +
-      `<span class="coll-pct">${pct.toFixed(1)}%</span>`;
+    const title = esc(tip || `占理论满值 ${pct.toFixed(1)}%`);
+    return `<span class="coll-bar" title="${title}"><i style="width:${pct.toFixed(1)}%"></i></span>` +
+      `<span class="coll-pct" title="${title}">${pct.toFixed(1)}%</span>`;
   }
 
   /**
@@ -1560,28 +1564,43 @@
       return box;
     }
     const hit = res.rows.filter(r => r.verdict === "better" || r.verdict === "new").length;
+    // 2026-10-13（用户要求）：只显示「有可能超过现有藏品」的维度——当前可入藏（new/better）或潜力可超（canExceed），
+    // 其余隐藏且不提示。行 = 副词条 | 藏品值 | 新件值 | 满级最值 | 藏品% | 满级最值%（值 3 列 + 百分比 2 列，均匀排布）。
+    const visible = res.rows.filter(r => r.verdict === "new" || r.verdict === "better" || r.canExceed);
+    // 头部徽章三档（2026-10-13 用户要求）：可入藏 N 项（当前有位可占）/ 满级可期（当前无位、但有维度满级后可超）/ 不可入藏（完全无机会）
+    const badgeHtml = hit
+      ? `<span class="badge badge-green">可入藏 ${hit} 项</span>`
+      : (visible.length
+        ? `<span class="badge badge-yellow">满级可期</span>`
+        : `<span class="badge badge-gray">不可入藏</span>`);
+    const listHtml = visible.length
+      ? `<div class="coll-rows">` + visible.map(r => {
+        // 值组带单位（量纲随词条）；百分比组 = 进度条 + 数字（均 ÷ 理论满值）；每格 title 悬停显示含义（2026-10-13）
+        const L = r.label;
+        const curTxt = r.cur == null ? '<span class="coll-empty">未收藏</span>' : collVal(r.cur, r.unit);
+        const curTip = r.cur == null
+          ? `藏品库「${L}」位未收藏`
+          : `藏品值 ${collVal(r.cur, r.unit)} · 藏品库「${L}」位当前持有值`;
+        const curBarTip = r.cur == null
+          ? `藏品库「${L}」位未收藏，无极限度`
+          : `藏品极限度 ${(r.cur / r.full * 100).toFixed(1)}% · 藏品值 ${collVal(r.cur, "")} ÷ 理论满值 ${collVal(r.full, "")}`;
+        const newTip = `新件值 ${collVal(r.value, r.unit)} · 该件当前的「${L}」值`;
+        const maxTip = `满级最值 ${collVal(r.potential, r.unit)} · 该件强化满级后的上限值（乐观）`;
+        const maxBarTip = `满级最值极限度 ${(r.potential / r.full * 100).toFixed(1)}% · 满级最值 ${collVal(r.potential, "")} ÷ 理论满值 ${collVal(r.full, "")}`;
+        return `<div class="coll-row">` +
+          `<span class="coll-dim">${esc(L)}</span>` +
+          `<span class="coll-cur" title="${esc(curTip)}">${curTxt}</span>` +
+          `<span class="coll-new ${r.verdict === "worse" ? "diff-neg" : "diff-pos"}" title="${esc(newTip)}">${collVal(r.value, r.unit)}</span>` +
+          `<span class="coll-max" title="${esc(maxTip)}">${collVal(r.potential, r.unit)}</span>` +
+          `<span class="coll-curpct">${r.cur == null ? `<span title="${esc(curBarTip)}">—</span>` : collRatioBar(r.cur / r.full, curBarTip)}</span>` +
+          `<span class="coll-maxpct">${collRatioBar(r.potential / r.full, maxBarTip)}</span>` +
+          `</div>`;
+      }).join("") + `</div>`
+      : "";
     box.innerHTML =
       `<div class="c-head"><span class="c-title">藏品视角（${esc(res.bucket.name)}）</span>` +
-      `<span class="badge ${hit ? "badge-green" : "badge-gray"}">${hit ? `可入藏 ${hit} 项` : "不可入藏"}</span></div>` +
-      `<div class="coll-rows">` + res.rows.map(r => {
-        let verdictHtml;
-        if (r.verdict === "new") verdictHtml = `<span class="badge badge-green">可入藏（新维度）</span>`;
-        else if (r.verdict === "better") verdictHtml = `<span class="badge badge-green">可入藏（刷新纪录 +${fmt(r.delta)}）</span>`;
-        else if (r.verdict === "none") verdictHtml = `<span class="badge badge-gray">无此词条</span>`;
-        else verdictHtml = `<span class="badge badge-gray">未超过（${fmt(r.delta)}）</span>`;
-        const potHtml = (r.cur != null && art.level < C.MAX_LEVEL)
-          ? `<span class="coll-pot${r.canExceed ? " diff-pos" : ""}">潜力 ${collVal(r.potential, r.unit)}` +
-            `${r.canExceed ? " · 满级后可能刷新" : ""}</span>`
-          : "";
-        return `<div class="coll-row">` +
-          `<span class="coll-dim">${esc(r.label)}</span>` +
-          `<span class="coll-cur">${r.cur == null ? '<span class="coll-empty">未收藏</span>' : collVal(r.cur, r.unit)}</span>` +
-          `<span class="coll-new ${r.verdict === "worse" ? "diff-neg" : "diff-pos"}">${collVal(r.value, r.unit)}</span>` +
-          `<span class="coll-verdict">${verdictHtml}</span>` +
-          `<span class="coll-ex">${collRatioBar(r.ratio)}</span>` +
-          potHtml +
-          `</div>`;
-      }).join("") + `</div>`;
+      badgeHtml + `</div>` +
+      listHtml;
 
     if (hit) {
       const btn = el("button", "btn btn-primary btn-sm coll-add", "存入藏品库");

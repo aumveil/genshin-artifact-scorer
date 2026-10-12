@@ -752,9 +752,36 @@ const path = require("path");
         { stat: "元素精通", value: 21, activated: true }
       ]
     });
-    const okPanel = panel.textContent.includes("藏品视角（火伤杯）") && panel.textContent.includes("可入藏（刷新纪录");
-    console.log("藏品视角面板:", okPanel ? "✓" : "✗", "|", panel.textContent.replace(/\s+/g, " ").slice(0, 88));
+    const okPanel = panel.textContent.includes("藏品视角（火伤杯）") && panel.textContent.includes("可入藏 2 项");
+    console.log("藏品视角面板:", okPanel ? "✓" : "✗", "|", panel.textContent.replace(/\s+/g, " ").slice(0, 96));
     if (!okPanel) process.exitCode = 1;
+
+    // 2026-10-13：只显示有可能超过现有藏品的维度（本件：双爆 better + 充能 new → 2 行；其余 4 维隐藏、不提示）
+    const visRows = panel.querySelectorAll(".coll-row").length;
+    console.log("藏品视角仅显示有机会维度（应 2 行）:", visRows, visRows === 2 ? "✓" : "✗");
+    if (visRows !== 2) process.exitCode = 1;
+
+    // 行结构 = 副词条|藏品值|新件值|满级最值|藏品%|满级最值%（值 3 列带单位；% 2 列 = 进度条 + 数字）
+    const cells0 = Array.from(panel.querySelectorAll(".coll-row")[0].children).map(c => c.textContent.trim());
+    const cells1 = Array.from(panel.querySelectorAll(".coll-row")[1].children).map(c => c.textContent.trim());
+    const okCells0 = cells0.join("|") === "双爆|45.2|50.6|50.6|82.8%|92.7%";
+    const okCells1 = cells1.join("|") === "充能|未收藏|5.2%|5.2%|—|13.3%";
+    console.log("行结构[双爆]:", cells0.join(" | "), okCells0 ? "✓" : "✗");
+    console.log("行结构[充能]:", cells1.join(" | "), okCells1 ? "✓" : "✗");
+    if (!okCells0 || !okCells1) process.exitCode = 1;
+    // 百分比组 = 进度条 + 数字：应 3 条（双爆行 2 条；充能行 1 条——其藏品% 为「—」无条）
+    const barCount = panel.querySelectorAll(".coll-bar").length;
+    console.log("百分比进度条数（应 3）:", barCount, barCount === 3 ? "✓" : "✗");
+    if (barCount !== 3) process.exitCode = 1;
+    // 悬停提示（title）：值 / 进度条显示含义（2026-10-13）
+    const tipOf = sel => { const e = panel.querySelector(sel); return e ? (e.getAttribute("title") || "") : ""; };
+    const okTips = tipOf(".coll-cur").includes("藏品值")
+      && tipOf(".coll-max").includes("满级最值")
+      && tipOf(".coll-maxpct .coll-bar").includes("极限度")
+      && tipOf(".coll-maxpct .coll-pct").includes("极限度");
+    console.log("悬停提示（值/进度条）:", okTips ? "✓" : "✗",
+      "|", tipOf(".coll-maxpct .coll-bar").slice(0, 40));
+    if (!okTips) process.exitCode = 1;
 
     // 暴击头属收藏桶 → 不应出现「不在藏品收藏范围内」
     const panelHead = App.ui.buildCollectionPanel({
@@ -764,6 +791,47 @@ const path = require("path");
     const okHead = !panelHead.textContent.includes("不在藏品收藏范围内");
     console.log("暴击头属收藏桶:", okHead ? "✓" : "✗");
     if (!okHead) process.exitCode = 1;
+
+    // 三档徽章②「满级可期」：当前无位可占、但有维度满级后可超（2026-10-13）
+    App.store.addCollectionItem({
+      slot: "circlet", set: "X", mainStat: "治疗加成", level: 20,
+      substats: [
+        { stat: "暴击率", value: 12.4, activated: true },
+        { stat: "暴击伤害", value: 15.6, activated: true },
+        { stat: "元素精通", value: 79, activated: true },
+        { stat: "攻击力百分比", value: 25.7, activated: true }
+      ]
+    });
+    const panelSoon = App.ui.buildCollectionPanel({
+      slot: "circlet", set: "千岩牢固", mainStat: "治疗加成", level: 0,
+      substats: [
+        { stat: "元素精通", value: 19, activated: true },
+        { stat: "生命值", value: 239, activated: true },
+        { stat: "攻击力", value: 16, activated: true },
+        { stat: "暴击率", value: 3.1, activated: false }
+      ]
+    });
+    const okSoon = panelSoon.textContent.includes("满级可期") &&
+      !panelSoon.textContent.includes("可入藏") &&
+      panelSoon.querySelectorAll(".coll-row").length === 1;
+    console.log("徽章[满级可期]:", okSoon ? "✓" : "✗", "|", panelSoon.textContent.replace(/\s+/g, " ").slice(0, 60));
+    if (!okSoon) process.exitCode = 1;
+
+    // 三档徽章③「不可入藏」：全面劣势件 → 全部维度隐藏 → 面板仅剩头部（2026-10-13）
+    const panelNone = App.ui.buildCollectionPanel({
+      slot: "goblet", set: "炽烈的炎之魔女", mainStat: "火元素伤害加成", level: 20,
+      substats: [
+        { stat: "攻击力百分比", value: 5.8, activated: true },
+        { stat: "元素精通", value: 23, activated: true },
+        { stat: "防御力", value: 21, activated: true },
+        { stat: "生命值", value: 299, activated: true }
+      ]
+    });
+    const okNone = panelNone.querySelectorAll(".coll-row").length === 0 &&
+      !panelNone.textContent.includes("不可能超过") &&
+      panelNone.textContent.includes("不可入藏");
+    console.log("藏品视角空态（全面劣势件，无行无提示）:", okNone ? "✓" : "✗", "|", panelNone.textContent.replace(/\s+/g, " ").slice(0, 60));
+    if (!okNone) process.exitCode = 1;
 
     // 藏品件参与重塑分析（游离件口径：按宿主角色评；无宿主则不列入）
     window.document.getElementById("btnRemodel").click();
