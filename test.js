@@ -1394,6 +1394,30 @@ console.log("\n== 藏品库（2026-10-11）==");
   x3.level = 16;
   assert(closeTo(core.analyzeCollection(x3, [c1]).rows.find(r => r.dimKey === "er").potential, 0),
     "无该词条 → 潜力不增长（强化不新增词条种类）");
+
+  // 3 初始件：解锁占 1 次强化 → 可叠加次数 = rem − 待激活条数（2026-10-13 修）
+  const t3 = {
+    id: "t3", slot: "circlet", set: "千岩牢固", mainStat: "治疗加成", level: 0,
+    substats: [
+      { stat: "元素精通", value: 19, activated: true },
+      { stat: "生命值", value: 239, activated: true },
+      { stat: "攻击力", value: 16, activated: true },
+      { stat: "暴击率", value: 3.1, activated: false }
+    ]
+  };
+  const a3 = core.analyzeCollection(t3, []);
+  assert(closeTo(a3.rows.find(r => r.dimKey === "crit").potential, 37.4),
+    "3 初始件双爆潜力 = 6.2 + 4×7.8 = 37.4（解锁占 1 次，不叠加）",
+    a3.rows.find(r => r.dimKey === "crit").potential);
+  assert(closeTo(a3.rows.find(r => r.dimKey === "em").potential, 111),
+    "3 初始件精通潜力 = 19 + 4×23 = 111", a3.rows.find(r => r.dimKey === "em").potential);
+  const t4 = JSON.parse(JSON.stringify(t3));
+  t4.substats.forEach(s => { s.activated = true; });
+  const a4 = core.analyzeCollection(t4, []);
+  assert(closeTo(a4.rows.find(r => r.dimKey === "crit").potential, 45.2),
+    "4 初始件潜力不受影响 = 6.2 + 5×7.8 = 45.2", a4.rows.find(r => r.dimKey === "crit").potential);
+  assert(closeTo(a4.rows.find(r => r.dimKey === "em").potential, 134),
+    "4 初始件精通潜力 = 19 + 5×23 = 134", a4.rows.find(r => r.dimKey === "em").potential);
   // 不在 26 桶内的件 → 不参与藏品比对
   const outs = mk("o", [{ stat: "暴击率", value: 3.9 }], "攻击力", "flower");
   assert(core.analyzeCollection(outs, []).inScope === false, "花的主词条为生命值 → 攻击力主词条的花不在收藏桶内");

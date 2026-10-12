@@ -643,7 +643,10 @@
     const bucket = collectionBucketOf(newArtifact);
     if (!bucket) return { inScope: false, bucket: null, rows: [] };
     const { holders } = collectionIndex(collection);
-    const rem = remaining(newArtifact.level);
+    // (d) 潜力用的「可叠加次数」：3 初始件的第 1 次强化用于解锁待激活词条（§七-10），不参与叠加。
+    // 与算法三 `remaining − |pending|` 同构（2026-10-13 修：此前未扣，含待激活件多算 1 发）。
+    const pendingCount = (newArtifact.substats || []).filter(s => s.activated === false).length;
+    const rem = Math.max(0, remaining(newArtifact.level) - pendingCount);
     const rows = C.collectionBucketDims(bucket).map(dimKey => {
       const dim = C.COLLECTION_DIM_BY_KEY[dimKey];
       const v = dimValue(newArtifact, dimKey);
