@@ -31,12 +31,20 @@
     "攻击力": "攻击力百分比", "生命值": "生命值百分比", "防御力": "防御力百分比"
   };
 
-  /** 从文本中解析一条「词条名+数值(±%)」 */
-  function parseStatSegment(text) {
+  // 词条解析正则表：模块加载时按「最长词条名优先」预构建一次（无 g 标志，可安全复用）
+  const STAT_REGEXES = statKeysSorted.map(key => ({
+    key,
+    re: new RegExp("^" + esc(key) + "\\s*\\+?\\s*([0-9]+(?:\\.[0-9]+)?)(%?)")
+  }));
+
+  /**
+   * 从文本开头解析一条「词条名+数值(±%)」；额外返回 consumed（本次匹配消费的字符数，含词条名），
+   * 供「零分隔连写词条切分」使用（如 攻击力+14生命值+5.8% → 先切 攻击力+14，再切 生命值+5.8%）
+   */
+  function parseStatAt(text) {
     const t = text.trim();
     // 词条名（最长前缀） + 可选 + 号 + 数值 + 可选 %
-    for (const key of statKeysSorted) {
-      const re = new RegExp("^" + esc(key) + "\\s*\\+?\\s*([0-9]+(?:\\.[0-9]+)?)(%?)");
+    for (const { key, re } of STAT_REGEXES) {
       const m = t.match(re);
       if (m) {
         let canonical = C.STAT_ALIASES[key];
@@ -49,21 +57,51 @@
         }
         const isPctStat = C.STAT_TYPE[canonical] === "percent";
 
-        // 未知类型词条（如主属性伤害加成）：按 % 推断，不校验
-        if (C.STAT_TYPE[canonical] === undefined) {
-          return { stat: canonical, value: num, valuePct: hasPct, warning: null };
+        let warning = null;
+        if (C.STAT_TYPE[canonical] !== undefined) {
+          // 单位一致性：百分比词条应带 %，数值词条不应带 %
+          if (isPctStat && !hasPct) warning = `${canonical} 为百分比词条，但文本中未带 %，请核对`;
+          else if (!isPctStat && hasPct) warning = `${canonical} 为数值词条，但文本中带 %，请核对`;
         }
-        // 单位一致性：百分比词条应带 %，数值词条不应带 %
-        if (isPctStat && !hasPct) {
-          return { stat: canonical, value: num, valuePct: false, warning: `${canonical} 为百分比词条，但文本中未带 %，请核对` };
-        }
-        if (!isPctStat && hasPct) {
-          return { stat: canonical, value: num, valuePct: true, warning: `${canonical} 为数值词条，但文本中带 %，请核对` };
-        }
-        return { stat: canonical, value: num, valuePct: hasPct, warning: null };
+        // 未知类型词条（如主属性伤害加成）：按 % 推断，不校验、无警告
+        return { stat: canonical, value: num, valuePct: hasPct, warning, consumed: m[0].length };
       }
     }
     return null;
+  }
+
+  /** 从文本中解析一条「词条名+数值(±%)」（对外兼容：返回结构不含 consumed） */
+  function parseStatSegment(text) {
+    const at = parseStatAt(text);
+    if (!at) return null;
+    return { stat: at.stat, value: at.value, valuePct: at.valuePct, warning: at.warning };
+  }
+
+  /**
+   * 拆分单个副词条片段 → 若干词条（支持零分隔连写：如「攻击力+14生命值+5.8%暴击伤害+7.0%」逐个切分）。
+   * 「待激活/未激活」标记绑定到前一条词条；若标记出现在片段开头则绑定后一条。
+   * 返回 { items: [{stat,value,warning,activated}], leftover: 无法识别的剩余字符串 }
+   */
+  function splitSubstatPart(seg) {
+    const items = [];
+    let rest = seg.trim();
+    let markNext = false;
+    while (rest) {
+      // 待激活标记
+      const mp = rest.match(/^[（(]?(待激活|未激活)[）)]?/);
+      if (mp) {
+        if (items.length) items[items.length - 1].activated = false;
+        else markNext = true;
+        rest = rest.slice(mp[0].length).trim();
+        continue;
+      }
+      const at = parseStatAt(rest);
+      if (!at) break;
+      items.push({ stat: at.stat, value: at.value, warning: at.warning, activated: !markNext });
+      markNext = false;
+      rest = rest.slice(at.consumed).trim();
+    }
+    return { items, leftover: rest };
   }
 
   /** 只匹配词条名（不含数值），用于多行格式的主属性名行（如独立的「生命值」行） */
@@ -93,6 +131,9 @@
 
     // ===== 归一化：删除所有 ★（星级符号，与识别无关）→ 换行统一为 ·（分行位置不确定，先合并成一行再识别切割）=====
     t = t.replace(/★+/g, "").replace(/\r?\n+/g, "·").replace(/ {2,}/g, " ");
+    // 冒号按分隔符处理（如「+0:攻击力+14」等级与副词条之间）；
+    // 但「套装名:(N)」「套装名：（0）」的标注形态保留不切（数字/括号数字紧跟冒号 → 视为套装标注，供启发式识别）
+    t = t.replace(/([:：])(?!\s*[(（]?\d)/g, "·");
 
     // 1. 部位（最长匹配）
     let slot = null, slotPos = -1;
@@ -147,16 +188,22 @@
         warnings.push("未识别到主属性：(空)");
       } else {
         let i = 0;
-        const firstParsed = parseStatSegment(segParts[0]);
+        let mainTail = "";   // 主属性片段内「数值(+N)」之后的残余（零分隔连写时并入副词条段）
+        const firstParsed = parseStatAt(segParts[0]);
         if (firstParsed) {
           // ===== 紧凑格式：主属性段 = 第一个片段「词条名+数值(+N)」=====
           // 该片段中的数值仅用于定位分段（主属性数值不入库、算法不依赖）
           mainStat = firstParsed.stat;
           if (firstParsed.warning) warnings.push(firstParsed.warning);
-          // 等级提取二：主属性段数值后的 +N / Lv.N（如 雷元素伤害加成7.0%+0 → 0）
-          if (level === null) {
-            const lv = segParts[0].match(/\+(\d+)\s*$/) || segParts[0].match(/Lv\.?\s*(\d+)/i);
-            if (lv) level = parseInt(lv[1], 10);
+          // 等级提取二：主属性数值「之后紧跟」的 +N / Lv.N（如 雷元素伤害加成7.0%+0 → 0）
+          // 按消费长度定位尾部，避免把整段结尾的 +N 误当等级（如「攻击力7.0%+0:攻击力+14」修复前的 +14）
+          const tail = segParts[0].trim().slice(firstParsed.consumed);
+          mainTail = tail;
+          const lv = tail.match(/^\+(\d+)/) || tail.match(/^Lv\.?\s*(\d+)/i);
+          if (lv) {
+            // 若等级已由独立片段确定，则以先到者为准；但 +N 一律从副条段剥离，不得混入
+            if (level === null) level = parseInt(lv[1], 10);
+            mainTail = tail.slice(lv[0].length);
           }
           i = 1;
         } else {
@@ -180,8 +227,10 @@
             warnings.push("未识别到主属性：" + segParts[0]);
           }
         }
-        // 副词条段 = 剩余片段
-        subText = segParts.slice(i).join("·");
+        // 副词条段 = 主属性段残余 + 剩余片段
+        const subParts = segParts.slice(i);
+        if (mainTail) subParts.unshift(mainTail);
+        subText = subParts.join("·");
       }
     } else {
       warnings.push("未识别到部位");
@@ -195,17 +244,26 @@
     // 4. 拆分副词条
     const parts = subText.split(SEPARATOR_RE).map(s => s.trim()).filter(Boolean);
 
-    // 4.0 未知套装启发式：未匹配到已知套装时，副词条段末尾的「套装名:(N)」形态片段应识别为套装
+    // 4.0 未知套装启发式：未匹配到已知套装时，副词条段末尾的「套装名:(N)」「套装名：（0）」形态片段应识别为套装
     //     （已知套装会被上方 setPos 切割出副词条段，不会混入；只有未知套装才会残留成这种片段）
     if (!set) {
       for (let i = parts.length - 1; i >= 0; i--) {
-        const m = parts[i].match(/^(.+?)[:：]\s*\(?(\d+)\)?$/);
-        if (m) {
-          set = m[1].trim();
-          setUnknown = true;   // 标记：来自启发式识别的「新套装」，由调用方决定是否加入自定义套装
-          parts.splice(i, 1);
-          break;
+        const m = parts[i].match(/^(.+?)[:：]\s*[（(]?(\d+)[）)]?$/);
+        if (!m) continue;
+        let name = m[1].trim();
+        // 零分隔连写（如「防御力+19（待激活）炉火融炼之心：（4）」）：
+        // 把词条前缀切回 parts 继续解析，套装名只取余下部分，避免前缀污染套装名
+        const sp = splitSubstatPart(name);
+        let head = "";
+        if (sp.items.length && sp.leftover) {
+          const cut = name.indexOf(sp.leftover);
+          if (cut > 0) { head = name.slice(0, cut); name = sp.leftover; }
         }
+        if (head) parts.splice(i, 1, head);
+        else parts.splice(i, 1);
+        set = name;
+        setUnknown = true;   // 标记：来自启发式识别的「新套装」，由调用方决定是否加入自定义套装
+        break;
       }
     }
     if (!set) warnings.push("未识别到套装，请手动选择");
@@ -213,17 +271,17 @@
     const substats = [];
     let pendingCount = 0;
     parts.forEach(p => {
-      const isPending = /待激活|未激活/.test(p);
-      const clean = p.replace(/[（(]?(待激活|未激活)[）)]?/g, "").trim();
-      const pm = parseStatSegment(clean);
-      if (pm) {
-        if (pm.warning) warnings.push(pm.warning);
-        const activated = !isPending;
-        if (!activated) pendingCount++;
-        substats.push({ stat: pm.stat, value: pm.value, activated });
-      } else {
+      const { items, leftover } = splitSubstatPart(p);
+      if (!items.length) {
         warnings.push("无法识别副词条片段：" + p);
+        return;
       }
+      items.forEach(it => {
+        if (it.warning) warnings.push(it.warning);
+        if (!it.activated) pendingCount++;
+        substats.push({ stat: it.stat, value: it.value, activated: it.activated });
+      });
+      if (leftover) warnings.push("无法识别副词条片段：" + leftover);
     });
 
     // 6. 初始判定

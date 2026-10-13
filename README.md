@@ -54,7 +54,7 @@
 ## 运行测试
 
 ```bash
-# 算法层与文本识别回归测试（370 条用例，Node 环境）
+# 算法层与文本识别回归测试（398 条用例，Node 环境）
 node test.js
 
 # DOM 集成冒烟测试（需 jsdom：npm i jsdom）

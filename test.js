@@ -590,6 +590,66 @@ console.log("== 文本识别（用户样例）==");
   console.log("  warnings:", res.warnings);
 }
 
+console.log("== 文本识别：连写词条与冒号分隔（2026-10-14 用户样例）==");
+{
+  // 样本 1：副词条零分隔连写（攻击力+14生命值+5.8%暴击伤害+7.0%）+ 已知套装「：（0）」标注
+  const t1 = "时之沙攻击力7.0%★★★★+0·攻击力+14生命值+5.8%暴击伤害+7.0%·暴击率+3.9%天之美赐：（0）";
+  const r1 = parser.parseArtifactText(t1);
+  assert(r1.result.slot === "sands", "连写：部位 = 时之沙", r1.result.slot);
+  assert(r1.result.set === "天之美赐" && r1.result.setUnknown === false, "连写：套装 = 天之美赐（已知）", r1.result.set);
+  assert(r1.result.mainStat === "攻击力百分比", "连写：主属性 = 攻击力百分比", r1.result.mainStat);
+  assert(r1.result.level === 0, "连写：等级 = 0", r1.result.level);
+  const subs1 = r1.result.substats.map(s => `${s.stat}:${s.value}`);
+  assert(subs1.length === 4 &&
+    JSON.stringify(subs1) === JSON.stringify(["攻击力:14", "生命值百分比:5.8", "暴击伤害:7", "暴击率:3.9"]),
+    "连写：副词条 4 条内容正确（攻击力14/生命值%5.8/爆伤7/暴击率3.9）", JSON.stringify(subs1));
+  assert(r1.ok, "连写：零警告 ok=true", JSON.stringify(r1.warnings));
+
+  // 样本 2：冒号分隔（+0:攻击力+14）→ 冒号视为分隔符；等级不得误吞结尾的 +14
+  const t2 = "时之沙攻击力7.0%★★★★+0:攻击力+14 生命值+5.8% 暴击伤害+7.0%·暴击率+3.9%天之美赐：（0）";
+  const r2 = parser.parseArtifactText(t2);
+  assert(r2.result.level === 0, "冒号：等级 = 0（不误吞 +14）", r2.result.level);
+  assert(r2.result.substats.length === 4 &&
+    r2.result.substats[0].stat === "攻击力" && r2.result.substats[0].value === 14,
+    "冒号：副词条 4 条、首条 = 攻击力14", JSON.stringify(r2.result.substats));
+  assert(r2.ok, "冒号：零警告 ok=true", JSON.stringify(r2.warnings));
+
+  // 连写 + 待激活标记：标记精确绑定所在词条（末条），不误标其它条
+  const t3 = "空之杯雷元素伤害加成7.0%+0·攻击力+4.1%生命值+4.7%元素充能效率+6.5%防御力+19（待激活）角斗士的终幕礼";
+  const r3 = parser.parseArtifactText(t3);
+  assert(r3.result.substats.length === 4, "连写待激活：副词条 4 条", JSON.stringify(r3.result.substats.map(s => s.stat)));
+  assert(r3.result.substats[3].stat === "防御力" && r3.result.substats[3].activated === false &&
+    r3.result.substats.slice(0, 3).every(s => s.activated),
+    "连写待激活：仅末条防御力待激活，其余 3 条激活", JSON.stringify(r3.result.substats));
+  assert(r3.ok, "连写待激活：零警告 ok=true", JSON.stringify(r3.warnings));
+
+  // 未知套装 + 全角括号标注「：（4）」→ 启发式识别
+  const t4 = "空之杯火元素伤害加成7.0%+20·暴击率+7.4%·暴击伤害+15.6%·攻击力百分比+11.6%·元素精通+23 炉火融炼之心：（4）";
+  const r4 = parser.parseArtifactText(t4);
+  assert(r4.result.set === "炉火融炼之心" && r4.result.setUnknown === true,
+    "全角括号：未知套装启发式识别", JSON.stringify({ s: r4.result.set, u: r4.result.setUnknown }));
+  assert(r4.result.substats.length === 4, "全角括号：副词条 4 条（套装名未混入）", JSON.stringify(r4.result.substats.map(s => s.stat)));
+  assert(!r4.warnings.some(w => w.includes("无法识别副词条片段") || w.includes("未识别到套装")),
+    "全角括号：无残留警告", JSON.stringify(r4.warnings));
+
+  // 零分隔连写 + 未知套装：词条前缀不得污染套装名
+  const t5 = "空之杯火元素伤害加成7.0%+20·暴击率+7.4%·暴击伤害+15.6%·攻击力百分比+11.6%·元素精通+23（待激活）炉火融炼之心:(4)";
+  const r5 = parser.parseArtifactText(t5);
+  assert(r5.result.set === "炉火融炼之心" && r5.result.setUnknown === true,
+    "连写套装名：set = 炉火融炼之心（无词条前缀污染）", r5.result.set);
+  assert(r5.result.substats.length === 4 && r5.result.substats[3].stat === "元素精通" && r5.result.substats[3].activated === false,
+    "连写套装名：副词条 4 条保留（末条待激活）", JSON.stringify(r5.result.substats));
+  assert(!r5.warnings.some(w => w.includes("无法识别副词条片段")),
+    "连写套装名：无「无法识别副词条片段」", JSON.stringify(r5.warnings));
+
+  // 等级双重出现（独立 +0 片段 + 主属性内 +0）：+N 一律从副条段剥离，无残留警告
+  const t6 = "时之沙\n攻击力7.0%+0\n★★★★+0\n暴击率+3.9%·暴击伤害+7.0%·攻击力+14·生命值+5.8% 天之美赐：（0）";
+  const r6 = parser.parseArtifactText(t6);
+  assert(r6.result.level === 0, "双重等级：level = 0", r6.result.level);
+  assert(r6.result.substats.length === 4, "双重等级：副词条 4 条", JSON.stringify(r6.result.substats.map(s => s.stat)));
+  assert(!r6.warnings.some(w => w.includes("无法识别副词条片段")), "双重等级：+0 不混入副条段", JSON.stringify(r6.warnings));
+}
+
 console.log("== 文本识别：多行字段格式（用户样例）==");
 {
   const text = "生之花\n生命值\n717\n★★★★★+0\n暴击率+2.7%·元素精通+23·暴击伤害+5.4%\n·攻击力+4.1%（待激活）角斗士的终幕礼：(4)";
