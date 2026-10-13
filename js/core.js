@@ -633,11 +633,12 @@
   }
 
   /**
-   * 藏品视角分析（新件 X vs 藏品库）——功能 (a) 入藏判定 / (c) 极限程度 / (d) 潜力。
+   * 藏品视角分析（新件 X vs 藏品库）——功能 (a) 入藏判定 / (c) 极限程度 / (d) 潜力 / (e) 止损容错。
    * 功能 (b) 择优由「入库 + collectionIndex 重算 + 删除冗余件」实现（见 store.addCollectionItem）。
    * @returns {Object} { inScope, bucket, rows: [{ dimKey, label, unit, value, cur, delta, full, ratio,
-   *                    verdict, holder, potential, potentialDelta, canExceed }] }
+   *                    verdict, holder, potential, potentialDelta, canExceed, need, tolerance }] }
    *   verdict：new（可入藏·新维度）| better（可入藏·刷新纪录）| worse（未超过）| none（该维为空且新件也没有）
+   *   need / tolerance：仅「未超过但满级可超」（worse && canExceed）的行非 null（见 (e)）。
    */
   function analyzeCollection(newArtifact, collection) {
     const bucket = collectionBucketOf(newArtifact);
@@ -659,14 +660,27 @@
       else verdict = "worse";
       // (d) 潜力：乐观上限，且只有「该件已有该维度词条」才吃得到强化（强化不新增词条种类）
       const hasDim = dim.stats.some(s => statValue(newArtifact, s) > 0);
-      const potential = v + (hasDim ? rem * C.collectionPerRoll(dimKey) : 0);
+      const perRoll = C.collectionPerRoll(dimKey);
+      const potential = v + (hasDim ? rem * perRoll : 0);
+      const canExceed = cur != null && Math.round(potential * 100) > Math.round(cur * 100);
+      // (e) 止损容错（2026-10-13 用户要求）：对「未超过但满级可超」的维度，还需至少命中 need 次
+      //     （全命中且满值口径 = 找到最小的 k 使 v + k×单发满挡 严格超过 cur）；
+      //     容错 tolerance = rem − need = 还能容忍几次「没加到该维度」——
+      //     歪满 (容错+1) 次后即使剩余全中满值也追不上（与 canExceed 同一 ×100 整数化比较口径）。
+      let need = null, tolerance = null;
+      if (verdict === "worse" && canExceed) {
+        for (let k = 0; k <= rem; k++) {
+          if (Math.round((v + k * perRoll) * 100) > Math.round(cur * 100)) { need = k; break; }
+        }
+        if (need != null) tolerance = rem - need;
+      }
       return {
         dimKey, label: dim.label, unit: dim.unit || "",
         value: v, cur, delta: cur == null ? null : v - cur,
         full, ratio: full > 0 ? v / full : 0,
         verdict, holder: h ? h.arts[0] : null,
         potential, potentialDelta: cur == null ? null : potential - cur,
-        canExceed: cur != null && Math.round(potential * 100) > Math.round(cur * 100)
+        canExceed, need, tolerance
       };
     });
     return { inScope: true, bucket, rows };

@@ -1422,6 +1422,46 @@ console.log("\n== 藏品库（2026-10-11）==");
   const outs = mk("o", [{ stat: "暴击率", value: 3.9 }], "攻击力", "flower");
   assert(core.analyzeCollection(outs, []).inScope === false, "花的主词条为生命值 → 攻击力主词条的花不在收藏桶内");
 
+  // —— 止损容错（2026-10-13）：need = 最少命中次数（全命中且满值口径）；tolerance = rem − need ——
+  // 花桶 4 初始 0 级件：双爆 2×3.9 + 6.3 = 14.1；藏品双爆 2×10.6 + 19.2 = 40.4
+  const flw = mk("flw", [
+    { stat: "暴击率", value: 10.6, activated: true },
+    { stat: "暴击伤害", value: 19.2, activated: true }
+  ], "生命值", "flower");
+  const fx = {
+    id: "fx", slot: "flower", set: "炽烈的炎之魔女", mainStat: "生命值", level: 0,
+    substats: [
+      { stat: "暴击率", value: 3.9, activated: true },
+      { stat: "暴击伤害", value: 6.3, activated: true },
+      { stat: "攻击力百分比", value: 5.2, activated: true },
+      { stat: "防御力", value: 21, activated: true }
+    ]
+  };
+  const fxRow = core.analyzeCollection(fx, [flw]).rows.find(r => r.dimKey === "crit");
+  assert(fxRow.verdict === "worse" && fxRow.canExceed, "止损：14.1 未超 40.4 但满级可超");
+  assert(fxRow.need === 4, "止损：need = 4（14.1 + 3×7.8 = 37.5 ≤ 40.4 < 14.1 + 4×7.8 = 45.3）", fxRow.need);
+  assert(fxRow.tolerance === 1, "止损：容错 = 5 − 4 = 1（歪 2 次后即无望）", fxRow.tolerance);
+  // 守门 46.8 → 必须全中（need = 5）→ 容错 0
+  const flw0 = mk("flw0", [
+    { stat: "暴击率", value: 12.5, activated: true },
+    { stat: "暴击伤害", value: 21.8, activated: true }
+  ], "生命值", "flower");
+  const fxRow0 = core.analyzeCollection(fx, [flw0]).rows.find(r => r.dimKey === "crit");
+  assert(fxRow0.need === 5 && fxRow0.tolerance === 0, "止损：需 5 次全中 → 容错 = 0（一次都不能歪）", [fxRow0.need, fxRow0.tolerance]);
+  // 全中恰好持平（53.1 = 14.1 + 5×7.8）→ 不算可超 → 无容错
+  const flwTie = mk("flwTie", [
+    { stat: "暴击率", value: 16.3, activated: true },
+    { stat: "暴击伤害", value: 20.5, activated: true }
+  ], "生命值", "flower");
+  const fxRowTie = core.analyzeCollection(fx, [flwTie]).rows.find(r => r.dimKey === "crit");
+  assert(!fxRowTie.canExceed && fxRowTie.tolerance === null, "止损：全中恰好持平不算可超 → tolerance = null");
+  // 3 初始待激活件：按 rem = 4 算（t3 双爆 6.2；藏品双爆 2×14.5 = 29.0）
+  const t3c = mk("t3c", [{ stat: "暴击率", value: 14.5, activated: true }], "治疗加成", "circlet");
+  const t3Row = core.analyzeCollection(t3, [t3c]).rows.find(r => r.dimKey === "crit");
+  assert(t3Row.need === 3 && t3Row.tolerance === 1, "止损：3 初始待激活件按 rem=4 算（need=3、容错=1）", [t3Row.need, t3Row.tolerance]);
+  // better 行不做容错（该维度已可入藏）
+  assert(erRow.need === null && erRow.tolerance === null, "止损：better 行不计算容错（need/tolerance = null）");
+
   // —— 完全取代才删（store 层）——
   const store = global.App.store;
   const storage = global.App.storage;

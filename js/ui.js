@@ -976,19 +976,25 @@
     return r.case === "自由件" ? "自由件替换" : "散件替换";
   }
 
-  /** 待评估新圣遗物摘要卡（独立页与弹窗共用）：主信息一行 + 副词条一行，紧凑显示
+  /** 待评估新圣遗物摘要卡（独立页与弹窗共用）：**单行紧凑卡**（2026-10-14 用户要求精简）——
+   *  [待] 小徽章（替代「待评估新圣遗物」字样）+ 件信息 · 副词条 · [修改][放弃]（右贴）；窄容器自动换行。
+   *  操作按钮（可选）：修改（onEdit，两处都传）；放弃（onAbandon，仅独立评估页传——弹窗的「放弃」在 footer）。
    *  注意：函数名区别于「部位卡」renderArtifactCard(role, slot, art)，避免闭包内函数覆盖 */
-  function renderPendingCard(art, onEdit) {
-    const box = el("div", "eval-case");
+  function renderPendingCard(art, onEdit, onAbandon) {
+    const box = el("div", "eval-case pend-card");
+    const btns =
+      (onEdit ? `<button class="btn btn-sm" id="reEdit">修改</button>` : "") +
+      (onAbandon ? `<button class="btn btn-sm" id="reAbandon">放弃</button>` : "");
     box.innerHTML =
-      `<div class="c-head"><span class="c-title">待评估新圣遗物</span>` +
-      (onEdit ? `<button class="btn btn-sm" id="reEdit">修改</button>` : "") + `</div>` +
-      `<div class="art-summary">${C.SLOTS[art.slot].name} · ${esc(art.set)} · Lv.${art.level} · ${esc(art.mainStat)}</div>` +
+      `<span class="pend-mark" title="待评估新圣遗物" aria-label="待评估新圣遗物">待</span>` +
+      `<span class="art-summary">${C.SLOTS[art.slot].name} · ${esc(art.set)} · Lv.${art.level} · ${esc(art.mainStat)}</span>` +
       ((art.substats || []).length
-        ? `<div class="art-substats">${(art.substats || []).map(s =>
-            `${esc(s.stat)} ${s.value}${C.STAT_TYPE[s.stat] === "percent" ? "%" : ""}${s.activated ? "" : "（待激活）"}`).join(" · ")}</div>`
-        : "");
+        ? `<span class="art-substats">${(art.substats || []).map(s =>
+            `${esc(s.stat)} ${s.value}${C.STAT_TYPE[s.stat] === "percent" ? "%" : ""}${s.activated ? "" : "（待激活）"}`).join(" · ")}</span>`
+        : "") +
+      (btns ? `<span class="pend-actions">${btns}</span>` : "");
     if (onEdit) box.querySelector("#reEdit").addEventListener("click", onEdit);
+    if (onAbandon) box.querySelector("#reAbandon").addEventListener("click", onAbandon);
     return box;
   }
 
@@ -1155,8 +1161,10 @@
     const hiddenCount = evalHidden.size;
     const valuable = all.filter(x => x.res.valuable && !evalHidden.has(x.role.id));
 
-    // 新件摘要（一行主信息 + 一行副词条）
-    wrap.appendChild(renderPendingCard(art, () => openArtifactModal(roles[0], art.slot, "new", pendingArtifact)));
+    // 新件摘要（一行主信息 + 一行副词条）；操作 = 修改 / 放弃（2026-10-14 用户要求：「放弃」在「修改」右侧）
+    wrap.appendChild(renderPendingCard(art,
+      () => openArtifactModal(roles[0], art.slot, "new", pendingArtifact),
+      () => { pendingArtifact = null; evalHidden.clear(); render(); }));
 
     // 藏品视角（未装备件收藏比对，与角色结论并列的另一套口径）
     wrap.appendChild(buildCollectionPanel(art));
@@ -1273,13 +1281,6 @@
       wrap.appendChild(el("div", "info", `其余 ${noVal} 个角色无提升（词条不足或无适用场景），未列出${hiddenNote}。`));
     }
 
-    // 操作：修改 / 放弃
-    const actions = el("div", null);
-    actions.style.cssText = "display:flex;gap:10px;margin-top:14px";
-    const btnCancel = el("button", "btn", "放弃");
-    btnCancel.addEventListener("click", () => { pendingArtifact = null; evalHidden.clear(); render(); });
-    actions.appendChild(btnCancel);
-    wrap.appendChild(actions);
     return wrap;
   }
 
@@ -1565,7 +1566,8 @@
     }
     const hit = res.rows.filter(r => r.verdict === "better" || r.verdict === "new").length;
     // 2026-10-13（用户要求）：只显示「有可能超过现有藏品」的维度——当前可入藏（new/better）或潜力可超（canExceed），
-    // 其余隐藏且不提示。行 = 副词条 | 藏品值 | 新件值 | 满级最值 | 藏品% | 满级最值%（值 3 列 + 百分比 2 列，均匀排布）。
+    // 其余隐藏且不提示。行 = 维度 | 藏品值 | 新件值 | 满级最值 | 止损容错 | 极限度合并条
+    //（值 3 项 + 容错 + 合并条；容错见下方 tolHtml，2026-10-13 用户要求）。
     const visible = res.rows.filter(r => r.verdict === "new" || r.verdict === "better" || r.canExceed);
     // 头部徽章三档（2026-10-13 用户要求）：可入藏 N 项（当前有位可占）/ 满级可期（当前无位、但有维度满级后可超）/ 不可入藏（完全无机会）
     const badgeHtml = hit
@@ -1575,25 +1577,58 @@
         : `<span class="badge badge-gray">不可入藏</span>`);
     const listHtml = visible.length
       ? `<div class="coll-rows">` + visible.map(r => {
-        // 值组带单位（量纲随词条）；百分比组 = 进度条 + 数字（均 ÷ 理论满值）；每格 title 悬停显示含义（2026-10-13）
+        // 值组带单位（量纲随词条）；每格 title 悬停显示含义（2026-10-13）
+        // 止损容错列（2026-10-13 用户要求）位于值组与极限度合并条之间：
+        //   「还可歪 N 次」= 再有 N 次「没加到该维度」仍可在满级时追上；歪满 (N+1) 次即无望（剩余全中满值也超不了）。
+        //   「不能歪」= 必须全中；better / new 行（该维度已可直接入藏）不涉及追赶 → 「—」。
         const L = r.label;
         const curTxt = r.cur == null ? '<span class="coll-empty">未收藏</span>' : collVal(r.cur, r.unit);
         const curTip = r.cur == null
           ? `藏品库「${L}」位未收藏`
           : `藏品值 ${collVal(r.cur, r.unit)} · 藏品库「${L}」位当前持有值`;
-        const curBarTip = r.cur == null
-          ? `藏品库「${L}」位未收藏，无极限度`
-          : `藏品极限度 ${(r.cur / r.full * 100).toFixed(1)}% · 藏品值 ${collVal(r.cur, "")} ÷ 理论满值 ${collVal(r.full, "")}`;
         const newTip = `新件值 ${collVal(r.value, r.unit)} · 该件当前的「${L}」值`;
         const maxTip = `满级最值 ${collVal(r.potential, r.unit)} · 该件强化满级后的上限值（乐观）`;
-        const maxBarTip = `满级最值极限度 ${(r.potential / r.full * 100).toFixed(1)}% · 满级最值 ${collVal(r.potential, "")} ÷ 理论满值 ${collVal(r.full, "")}`;
+        // 极限度合并条（2026-10-14 五版，用户设计）：一根条、两段色——金段 = 目前（藏品极限度）、
+        // 绿段 = 满级预期增量；条左右分别为「藏品%」「满级最值%」数字（固定 48px 右/左对齐 → 跨行严格对齐）。
+        // 均 ÷ 理论满值、clamp 0~100；visible 行（worse&&canExceed / better）恒有 potential > cur → 绿段 > 0。
+        const pctClamp = x => Math.max(0, Math.min(1, isFinite(x) ? x : 0)) * 100;
+        const curPct = r.cur == null ? null : pctClamp(r.cur / r.full);
+        const maxPct = pctClamp(r.potential / r.full);
+        const curPctTxt = curPct == null ? "—" : curPct.toFixed(1) + "%";
+        const maxPctTxt = maxPct.toFixed(1) + "%";
+        const curPctTip = r.cur == null
+          ? `藏品库「${L}」位未收藏，无极限度`
+          : `藏品极限度 ${curPctTxt} · 藏品值 ${collVal(r.cur, "")} ÷ 理论满值 ${collVal(r.full, "")}`;
+        const maxPctTip = `满级最值极限度 ${maxPctTxt} · 满级最值 ${collVal(r.potential, "")} ÷ 理论满值 ${collVal(r.full, "")}`;
+        const barTip = `极限度对照：藏品 ${curPctTxt} → 满级最值 ${maxPctTxt}（均 ÷ 理论满值 ${collVal(r.full, "")}；金色段 = 目前、绿色段 = 满级预期的增量）`;
+        const segA = curPct == null ? 0 : curPct;             // 金段宽（目前）
+        const segB = Math.max(0, maxPct - segA);              // 绿段宽（满级预期增量）
+        const pctsHtml =
+          `<span class="coll-pcts">` +
+          `<span class="coll-pct coll-pct-cur" title="${esc(curPctTip)}">${curPctTxt}</span>` +
+          `<span class="coll-bar" title="${esc(barTip)}">` +
+          `<i class="seg-cur" style="left:0;width:${segA.toFixed(1)}%"></i>` +
+          `<i class="seg-pot" style="left:${segA.toFixed(1)}%;width:${segB.toFixed(1)}%"></i>` +
+          `</span>` +
+          `<span class="coll-pct coll-pct-max" title="${esc(maxPctTip)}">${maxPctTxt}</span>` +
+          `</span>`;
+        const tolTxt = r.tolerance == null
+          ? "—"
+          : (r.tolerance > 0 ? `还可歪 ${r.tolerance} 次` : "不能歪");
+        const tolTip = r.tolerance == null
+          ? "该维度已可直接入藏，不涉及止损追赶"
+          : (r.tolerance > 0
+            ? `止损容错：还需命中 ${r.need} 次才能超过藏品（${collVal(r.cur, "")}）· 最多还能歪 ${r.tolerance} 次；歪满 ${r.tolerance + 1} 次后即无望（剩余全中满值也追不上）`
+            : `止损容错：还需命中 ${r.need} 次才能超过藏品（${collVal(r.cur, "")}）· 一次都不能歪；再歪 1 次即无望（剩余全中满值也追不上）`);
+        const tolCls = r.tolerance == null ? " none" : (r.tolerance === 0 ? " tight" : "");   // 三态：常规（黄）/ tight（仅标记类，与常规完全同款）/ none（灰）
+        const tolHtml = `<span class="coll-tol${tolCls}" title="${esc(tolTip)}">${tolTxt}</span>`;
         return `<div class="coll-row">` +
           `<span class="coll-dim">${esc(L)}</span>` +
           `<span class="coll-cur" title="${esc(curTip)}">${curTxt}</span>` +
           `<span class="coll-new ${r.verdict === "worse" ? "diff-neg" : "diff-pos"}" title="${esc(newTip)}">${collVal(r.value, r.unit)}</span>` +
           `<span class="coll-max" title="${esc(maxTip)}">${collVal(r.potential, r.unit)}</span>` +
-          `<span class="coll-curpct">${r.cur == null ? `<span title="${esc(curBarTip)}">—</span>` : collRatioBar(r.cur / r.full, curBarTip)}</span>` +
-          `<span class="coll-maxpct">${collRatioBar(r.potential / r.full, maxBarTip)}</span>` +
+          tolHtml +
+          pctsHtml +
           `</div>`;
       }).join("") + `</div>`
       : "";

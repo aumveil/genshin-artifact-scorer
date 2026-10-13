@@ -459,7 +459,7 @@ body { background: var(--bg-0); }
   -webkit-text-fill-color: var(--text-3);
 }
 .ov-main { flex: 1; min-width: 340px; display: flex; flex-direction: column; gap: 12px; }
-/* 达成度进度条 */
+/* 达成度进度条（撑满 ov-main；2026-10-14 曾试缩至 400px——用户否决：「缩短后卡片右侧比较空」，恢复撑满） */
 .ov-progress {
   height: 6px; border-radius: 3px; overflow: hidden;
   background: var(--fill-1);
@@ -470,8 +470,11 @@ body { background: var(--bg-0); }
   background: var(--brand);
   transition: width 0.6s var(--ease);
 }
+/* 信息小块：横向均匀分布（space-between；2026-10-14 用户要求「词条数、完美基准等条目均匀分配下位置」，
+   块间 gap 40px 为最小间隔，剩余空间由 space-between 均分 → 首块贴左、末块贴右） */
 .score-overview .ov-stats {
-  flex: 1; min-width: 320px; display: flex; flex-wrap: wrap; gap: 14px 40px; align-items: flex-start;
+  flex: 1; min-width: 320px; display: flex; flex-wrap: wrap;
+  gap: 14px 40px; align-items: flex-start; justify-content: space-between;
 }
 .score-overview .ov-item { display: flex; flex-direction: column; gap: 3px; }
 .score-overview .ov-item .lbl { font-size: var(--fs-sm); color: var(--text-3); letter-spacing: 0.5px; }
@@ -803,6 +806,23 @@ body { background: var(--bg-0); }
 .art-summary { font-size: var(--fs-base); font-weight: 600; margin-bottom: 4px; color: var(--text-1); }
 .art-substats { font-size: var(--fs-sm); color: var(--text-3); line-height: 1.7; }
 
+/* 待评估新圣遗物 · 单行紧凑卡（2026-10-14 用户要求精简）：
+   [待] 徽章 + 件信息 + 副词条 + 操作按钮（右贴）；窄容器（评估弹窗）自动换行。
+   注：重塑卡等其它组的 .art-substats 不受影响（作用域限定 .pend-card）。 */
+.pend-card {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px;
+  padding: 10px 14px;
+}
+.pend-card .pend-mark {
+  flex: 0 0 auto; width: 24px; height: 24px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  color: var(--brand-strong); font-size: 13px; font-weight: 600;
+}
+.pend-card .art-summary { margin-bottom: 0; }
+.pend-card .art-substats { line-height: 1.4; margin-left: 36px; }   /* 与主信息拉开（2026-10-14 用户指定：14 gap + 36 = 50px 视觉间隔） */
+.pend-card .pend-actions { margin-left: auto; display: inline-flex; gap: 8px; }
+
 /* 评估图例 */
 .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 12px; font-size: var(--fs-sm); color: var(--text-3); }
 .legend .lg { display: inline-flex; align-items: center; gap: 7px; }
@@ -999,12 +1019,14 @@ body { background: var(--bg-0); }
 }
 .coll-bucket-title { font-size: var(--fs-lg); color: var(--text-1); font-weight: 600; margin-bottom: 8px; }
 
-/* 四列：属性 | 值 | 极限度（吸收剩余宽度） | 持有件
+/* 四列：属性 | 值 | 极限度（固定 211px = 条 160 + 间隔 7 + 百分比 44） | 持有件
+   ⚠ 极限度列 2026-10-14 由弹性（minmax(120px,0.8fr)，1440px 视口下 309px、条长 258px）
+   收为固定 211px —— 用户反馈「进度条太长」；固定后条在任何窗口宽度下恒定 160px（勿改回弹性）。
    持有件内部各元素用固定宽度 → 跨行上下对齐；整块右对齐 → 右端齐平 */
 .coll-rows { display: flex; flex-direction: column; gap: 6px; }
 .coll-row {
   display: grid;
-  grid-template-columns: 64px 96px minmax(120px, 0.8fr) minmax(0, 1.6fr);
+  grid-template-columns: 64px 96px 211px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
@@ -1041,26 +1063,49 @@ body { background: var(--bg-0); }
 .coll-cold { color: var(--text-3); }
 .coll-empty { color: var(--text-3); }
 
-/* —— 藏品视角面板（评估结果内嵌，2026-10-13）：副词条|藏品值|新件值|满级最值|藏品%|满级最值%
-      —— 值组 3 列固定 88px（组内紧凑）+ 弹性间隔带（组间分隔）+ 百分比组 2 列（进度条 + 数字，弹性，组内 16px 间隔）；
-         数字统一字号（= 行字号）；满级最值两列数字绿色；各值 / 进度条均带 title 悬停提示 —— */
+/* —— 藏品视角面板（评估结果内嵌）：维度 | 藏品值 | 新件值 | 满级最值 | 止损容错 | 极限度合并条
+      —— 行 = **flex + space-between**（2026-10-14 六版：用户要求「元素等间隔布置、行末不留空白」）：
+         各元素固定宽（维度 46 / 值 74×3 / 容错 90），间隙由 space-between 均分（gap 4 为最小间隙）；
+         内容总宽恒定 → 跨行严格对齐；独立页间隙 ≈64px 铺满全宽、弹窗收缩至间隙 4px（条 ≈28px）。
+         极限度 = **合并条**（五版）：金段 = 目前（藏品极限度）、绿段 = 满级预期增量，
+         条左右为「藏品% / 满级最值%」数字（固定 48px 右/左对齐）；均 ÷ 理论满值、clamp 0~100。 —— */
 .coll-panel .coll-row {
-  grid-template-columns: 52px 88px 88px 88px minmax(24px, 1.3fr) minmax(0, 1.35fr) 8px minmax(0, 1.35fr);
-  column-gap: 4px;
+  display: flex; align-items: center; gap: 4px; justify-content: space-between;
 }
-.coll-panel .coll-dim { grid-column: 1; }
-.coll-panel .coll-cur { grid-column: 2; }
-.coll-panel .coll-new { grid-column: 3; }
-.coll-panel .coll-max { grid-column: 4; }
-.coll-panel .coll-curpct { grid-column: 6; }
-.coll-panel .coll-maxpct { grid-column: 8; }
+.coll-panel .coll-dim { flex: 0 0 46px; }
+.coll-panel .coll-cur, .coll-panel .coll-new, .coll-panel .coll-max { flex: 0 0 74px; }
+.coll-panel .coll-tol { flex: 0 0 90px; }
+.coll-panel .coll-pcts { flex: 0 1 auto; }
 .coll-cur { font-family: var(--font-num); color: var(--text-1); text-align: right; }
 .coll-new { font-family: var(--font-num); text-align: right; }
 .coll-max { font-family: var(--font-num); color: var(--green); text-align: right; }
-.coll-curpct, .coll-maxpct { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.coll-panel .coll-curpct .coll-bar, .coll-panel .coll-maxpct .coll-bar { min-width: 12px; }
-.coll-panel .coll-curpct .coll-pct, .coll-panel .coll-maxpct .coll-pct { flex: 0 0 auto; font-size: inherit; }
-.coll-panel .coll-maxpct .coll-pct { color: var(--green); }
+/* 止损容错列 = 还可歪 N 次 / 不能歪 / —（灰：已可入藏）
+   「不能歪」与「还可歪」**完全同款**（同色同字重，2026-10-14 用户指定）——仅文案不同；.tight 仅作标记类（测试定位用）。
+   左内距 14px（弹窗内与值组的呼吸）；13px 小一号（从属但醒目） */
+.coll-tol {
+  padding-left: 14px; font-size: var(--fs-md);
+  color: var(--yellow); font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* ⚠ 容错列各变体均勿用 .warn 类名——与第 14 节全局「提示条」.warn 撞名（会带上 padding/border/背景） */
+.coll-tol.none { color: var(--text-3); font-weight: 400; }
+/* 浅色模式：--yellow 在浅底上对比不足 → 深金（按行背景 #e5e5ea 调校）；「—」走变量无需覆盖 */
+[data-appearance="light"] .coll-tol:not(.none) { color: #755d00; }
+/* 极限度合并条（2026-10-14 五版）：[藏品% 48px][条 基准 320px][满级% 48px] 整体成组；
+   条两段绝对定位：.seg-cur = 金（目前）、.seg-pot = 绿（满级预期增量）；left/width 由行内 % 指定。
+   独立页组合 432px（条 320）；弹窗随行收缩至组合 140px（条 28px）。 */
+.coll-pcts { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; }
+.coll-panel .coll-pct {
+  flex: 0 0 48px; font-size: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.coll-panel .coll-pct-cur { text-align: right; color: var(--text-1); }
+.coll-panel .coll-pct-max { text-align: left; color: var(--green); }
+/* 条用 width（而非 flex-basis）表达 320px 基准——flex-basis 不参与组合的固有宽度（intrinsic）计算，
+   会被算成「条内容 0 + min-width 12」→ 组合塌缩成 124px（2026-10-14 实测踩坑）。 */
+.coll-panel .coll-pcts .coll-bar { width: 320px; flex: 0 1 auto; min-width: 12px; position: relative; }
+.coll-panel .coll-pcts .coll-bar > i { position: absolute; top: 0; border-radius: 0; }
+.coll-panel .coll-pcts .seg-cur { background: var(--brand); }
+.coll-panel .coll-pcts .seg-pot { background: var(--green); }
 .coll-add { margin-top: 10px; }
 
 .coll-nav { display: inline-flex; gap: 6px; margin-left: auto; }
@@ -1071,12 +1116,13 @@ body { background: var(--bg-0); }
   .coll-bucket { min-width: 700px; }
 }
 @media (max-width: 768px) {
-  .coll-panel .coll-row {
-    grid-template-columns: 44px minmax(36px, 42px) minmax(36px, 42px) minmax(36px, 42px) minmax(6px, 0.8fr) minmax(0, 1fr) 6px minmax(0, 1fr);
-    column-gap: 3px;
-    font-size: 11px;
-  }
-  .coll-panel .coll-curpct .coll-bar, .coll-panel .coll-maxpct .coll-bar { display: none; }
+  /* 窄屏（flex 行）：允许换行；元素改内容宽；合并条隐藏、仅两数字并排 */
+  .coll-panel .coll-row { flex-wrap: wrap; gap: 3px 10px; font-size: 11px; }
+  .coll-panel .coll-dim, .coll-panel .coll-cur, .coll-panel .coll-new, .coll-panel .coll-max { flex: 0 0 auto; }
+  .coll-panel .coll-tol { flex: 0 0 auto; padding-left: 0; }
+  .coll-panel .coll-pcts { flex: 0 0 auto; justify-content: flex-end; gap: 6px; }
+  .coll-panel .coll-pct { flex: 0 0 auto; }
+  .coll-panel .coll-pcts .coll-bar { display: none; }
 }
 
 

@@ -761,26 +761,28 @@ const path = require("path");
     console.log("藏品视角仅显示有机会维度（应 2 行）:", visRows, visRows === 2 ? "✓" : "✗");
     if (visRows !== 2) process.exitCode = 1;
 
-    // 行结构 = 副词条|藏品值|新件值|满级最值|藏品%|满级最值%（值 3 列带单位；% 2 列 = 进度条 + 数字）
+    // 行结构 = 维度|藏品值|新件值|满级最值|止损容错|极限度合并条（六列；合并条列 textContent = 左% + 右% 拼接）
     const cells0 = Array.from(panel.querySelectorAll(".coll-row")[0].children).map(c => c.textContent.trim());
     const cells1 = Array.from(panel.querySelectorAll(".coll-row")[1].children).map(c => c.textContent.trim());
-    const okCells0 = cells0.join("|") === "双爆|45.2|50.6|50.6|82.8%|92.7%";
-    const okCells1 = cells1.join("|") === "充能|未收藏|5.2%|5.2%|—|13.3%";
+    const okCells0 = cells0.join("|") === "双爆|45.2|50.6|50.6|—|82.8%92.7%";
+    const okCells1 = cells1.join("|") === "充能|未收藏|5.2%|5.2%|—|—13.3%";
     console.log("行结构[双爆]:", cells0.join(" | "), okCells0 ? "✓" : "✗");
     console.log("行结构[充能]:", cells1.join(" | "), okCells1 ? "✓" : "✗");
     if (!okCells0 || !okCells1) process.exitCode = 1;
-    // 百分比组 = 进度条 + 数字：应 3 条（双爆行 2 条；充能行 1 条——其藏品% 为「—」无条）
+    // 极限度合并条（2026-10-14 五版）：每行 1 条（双爆行 + 充能行 = 2 条）；段 = .seg-cur 金 / .seg-pot 绿（均绝对定位）
     const barCount = panel.querySelectorAll(".coll-bar").length;
-    console.log("百分比进度条数（应 3）:", barCount, barCount === 3 ? "✓" : "✗");
-    if (barCount !== 3) process.exitCode = 1;
-    // 悬停提示（title）：值 / 进度条显示含义（2026-10-13）
+    const segCount = panel.querySelectorAll(".coll-pcts .seg-cur, .coll-pcts .seg-pot").length;
+    console.log("合并条数（应 2）/ 段数（应 4）:", barCount, segCount,
+      barCount === 2 && segCount === 4 ? "✓" : "✗");
+    if (barCount !== 2 || segCount !== 4) process.exitCode = 1;
+    // 悬停提示（title）：值 / 合并条显示含义
     const tipOf = sel => { const e = panel.querySelector(sel); return e ? (e.getAttribute("title") || "") : ""; };
     const okTips = tipOf(".coll-cur").includes("藏品值")
       && tipOf(".coll-max").includes("满级最值")
-      && tipOf(".coll-maxpct .coll-bar").includes("极限度")
-      && tipOf(".coll-maxpct .coll-pct").includes("极限度");
-    console.log("悬停提示（值/进度条）:", okTips ? "✓" : "✗",
-      "|", tipOf(".coll-maxpct .coll-bar").slice(0, 40));
+      && tipOf(".coll-pcts .coll-bar").includes("极限度")
+      && tipOf(".coll-pct-max").includes("极限度");
+    console.log("悬停提示（值/合并条）:", okTips ? "✓" : "✗",
+      "|", tipOf(".coll-pcts .coll-bar").slice(0, 40));
     if (!okTips) process.exitCode = 1;
 
     // 暴击头属收藏桶 → 不应出现「不在藏品收藏范围内」
@@ -816,6 +818,34 @@ const path = require("path");
       panelSoon.querySelectorAll(".coll-row").length === 1;
     console.log("徽章[满级可期]:", okSoon ? "✓" : "✗", "|", panelSoon.textContent.replace(/\s+/g, " ").slice(0, 60));
     if (!okSoon) process.exitCode = 1;
+
+    // 止损容错（2026-10-13）：「还可歪 1 次」——精通行 19 + 3×23 = 88 > 79；19 + 2×23 = 65 ≤ 79 → need = 3、rem = 4
+    const tolSoon = panelSoon.querySelector(".coll-tol");
+    const okTolSoon = !!tolSoon && tolSoon.textContent === "还可歪 1 次";
+    console.log("止损容错[还可歪 1 次]:", okTolSoon ? "✓" : "✗", "|", tolSoon ? tolSoon.textContent : "(无)");
+    if (!okTolSoon) process.exitCode = 1;
+
+    // 止损容错为 0 → 「不能歪」（与「还可歪」同款样式，仅 .tight 标记类）：花桶守门双爆 46.8，需 5 次全中（14.1 + 4×7.8 = 45.3 ≤ 46.8）
+    App.store.addCollectionItem({
+      slot: "flower", set: "X", mainStat: "生命值", level: 20,
+      substats: [
+        { stat: "暴击率", value: 12.5, activated: true },
+        { stat: "暴击伤害", value: 21.8, activated: true }
+      ]
+    });
+    const panelTight = App.ui.buildCollectionPanel({
+      slot: "flower", set: "炽烈的炎之魔女", mainStat: "生命值", level: 0,
+      substats: [
+        { stat: "暴击率", value: 3.9, activated: true },
+        { stat: "暴击伤害", value: 6.3, activated: true },
+        { stat: "防御力", value: 21, activated: true },
+        { stat: "生命值", value: 239, activated: true }
+      ]
+    });
+    const tolTight = panelTight.querySelector(".coll-tol");
+    const okTolTight = !!tolTight && tolTight.textContent === "不能歪" && tolTight.classList.contains("tight");
+    console.log("止损容错[不能歪·tight]:", okTolTight ? "✓" : "✗", "|", tolTight ? tolTight.textContent : "(无)");
+    if (!okTolTight) process.exitCode = 1;
 
     // 三档徽章③「不可入藏」：全面劣势件 → 全部维度隐藏 → 面板仅剩头部（2026-10-13）
     const panelNone = App.ui.buildCollectionPanel({
