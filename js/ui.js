@@ -12,10 +12,11 @@
   const feedback = global.App.feedback;   // 反馈层：toast / confirm / prompt / info
 
   let view = { type: "list" };            // {type:'list'} | {type:'detail', roleId} | {type:'evaluate'} | {type:'remodel'}
+  let lastViewType = null;                // 上一次渲染的视图类型（批次 5：视图切换方向感动效用；null = 尚未渲染过）
   // 首页筛选状态：独立于 view（切视图不丢失），并持久化到 localStorage（刷新/重开恢复上次筛选）
   // 结构 { mode: "role" | "loose", slot, mainStat, sets } —— 两条互斥路径（①按角色②按散件），仅当前路条件生效
   let listFilter = (typeof global.App.storage.loadFilter === "function" && global.App.storage.loadFilter())
-    || { mode: "role", slot: "", mainStat: "", sets: [] };
+    || { mode: "role", slot: "", mainStat: "", sets: [], q: "" };
   const persistFilter = () => { try { global.App.storage.saveFilter(listFilter); } catch (e) { /* 静默 */ } };
   // 套装筛选的**特殊项** sentinel：代表「套装字段为空」——即 core.roleSets(role) 为 [] 的角色，
   // 含两类：① 字段留空（＝「其他」）② 5 部位未录全（当这个角色不存在）。两者在详情页都显示为「其他 / 不判套装」。
@@ -47,6 +48,19 @@
   };
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmt = n => (Number.isFinite(n) ? (Math.round(n * 100) / 100).toString() : "-");
+  // SVG 图标（2026-10-15 批次 2）：引用 index.html 内联 sprite（#i-xxx）；图标旁均有文字或 aria-label，故对辅助技术隐藏
+  const ico = (name, cls) => `<svg class="ico${cls ? " " + cls : ""}" aria-hidden="true" focusable="false"><use href="#i-${name}"></use></svg>`;
+
+  /** 让元素可键盘触发（2026-10-15 批次 3）：tabindex + role=button + Enter/Space → 与点击同径 */
+  function makeActivatable(node, fn, ariaLabel) {
+    node.tabIndex = 0;
+    node.setAttribute("role", "button");
+    if (ariaLabel) node.setAttribute("aria-label", ariaLabel);
+    node.addEventListener("click", fn);
+    node.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); }
+    });
+  }
 
   // 角色元素图标 HTML（优先级：role.element > 角色名映射；未配置返回空串）
   function elementIconHtml(role, extraCls) {
@@ -66,11 +80,20 @@
     const app = $("#app");
     app.innerHTML = "";
     const roles = store.getRoles();
-    if (view.type === "detail") {
-      const role = store.getRole(view.roleId);
-      if (role) { app.appendChild(renderDetail(role)); return; }
-      view = { type: "list" };
-    }
+    // —— 视图切换方向感（2026-10-15 批次 5）：进入详情 = 前进（右滑入）、详情→列表 = 后退（左滑入）、
+    //    其余视图间切换 = 原地淡入；同一视图内的重渲染不动画（无类不播）。
+    //    动画实际施加在视图**子节点**上（每次渲染重建 → 类存在即从头播）；位移落在 .app 的 20px 内边距内，
+    //    任何宽度下都不会把内容推出视口产生横滚（2026-10-15 终审修正——曾施加于 .app 本体导致窄屏动画期可横滚）。 ——
+    if (view.type === "detail" && !store.getRole(view.roleId)) view = { type: "list" };   // 角色不存在 → 回退列表
+    const curType = view.type;
+    let dirCls = "";
+    if (curType === "detail" && lastViewType !== "detail") dirCls = "v-fwd";
+    else if (lastViewType === "detail" && curType === "list") dirCls = "v-back";
+    else if (lastViewType !== null && curType !== lastViewType) dirCls = "v-lat";
+    lastViewType = curType;
+    app.classList.remove("v-fwd", "v-back", "v-lat");
+    if (dirCls) app.classList.add(dirCls);
+    if (view.type === "detail") { app.appendChild(renderDetail(store.getRole(view.roleId))); return; }
     if (view.type === "evaluate") {
       app.appendChild(renderEvaluateView());
       return;
@@ -85,10 +108,10 @@
     }
     if (roles.length === 0) {
       const empty = el("div", "empty",
-        '<div class="icon" aria-hidden="true">🏺</div>' +
+        '<div class="icon" aria-hidden="true">' + ico("users") + '</div>' +
         '<div class="empty-title">还没有角色数据</div>' +
         '<div class="empty-desc">创建你的第一个角色，录入圣遗物后即可查看评分；也可以从备份文件导入已有数据。</div>');
-      const btnNew = el("button", "btn btn-primary", "＋ 新建角色");
+      const btnNew = el("button", "btn btn-primary", ico("plus") + "新建角色");
       btnNew.addEventListener("click", createRoleFlow);
       empty.appendChild(btnNew);
       app.appendChild(empty);
@@ -168,10 +191,11 @@
       `</div>`;
 
     // 删除角色入口仅保留在角色详情页（首页卡片整卡可点击进入详情，不再挂删除按钮）
-    card.addEventListener("click", () => {
+    // 2026-10-15 批次 3：整卡键盘可达（tabindex + Enter/Space）
+    makeActivatable(card, () => {
       view = { type: "detail", roleId: role.id };
       render();
-    });
+    }, `${role.name} · 查看详情`);
     return card;
   }
 
@@ -182,6 +206,7 @@
     //   ② 按散件 mode="loose"：只筛散件部位（role.looseSlot）与主词条（该部位已录入件的 mainStat）
     const f = listFilter;
     if (!Array.isArray(f.sets)) f.sets = [];
+    if (typeof f.q !== "string") f.q = "";
     if (f.mode !== "role" && f.mode !== "loose") f.mode = "role";
     const allMain = [...new Set(C.SLOT_KEYS.flatMap(s => C.MAIN_STATS_BY_SLOT[s] || []))];
     // 语义校验（持久化恢复的旧数据 / 套装列表变化后）：非法部位连主属性一起清；主属性不在候选则清
@@ -197,7 +222,9 @@
 
     // —— 筛选计算（按 mode 走单一路径；两条路不同时生效）——
     function computeFiltered() {
+      const q = (f.q || "").trim().toLowerCase();
       return roles.filter(role => {
+        if (q && !role.name.toLowerCase().includes(q)) return false;   // 搜索：与路径条件 AND 叠加（2026-10-15 批次 3）
         if (f.mode === "role") {
           if (!f.sets.length) return true;                      // 未选套装 → 不筛
           // 套装判定（2026-10-09）：读角色套装字段 —— 命中 ⟺ roleSets(role) 与所选集合有交集。
@@ -220,7 +247,7 @@
       });
     }
     /** 当前路是否设置了条件（决定 info 提示条显示） */
-    const isActive = () => f.mode === "role" ? f.sets.length > 0 : !!(f.slot || f.mainStat);
+    const isActive = () => !!(f.q || "").trim() || (f.mode === "role" ? f.sets.length > 0 : !!(f.slot || f.mainStat));
 
     // —— 筛选栏：路径标签页（按角色 / 按散件）+ 当前路条件 + 清除 ——
     const fBar = el("div", "filter-bar");
@@ -234,7 +261,7 @@
       tab.addEventListener("click", () => {
         if (listFilter.mode === p.key) return;
         // 切换即清空另一路条件（两条路不同时生效）
-        listFilter = { mode: p.key, slot: "", mainStat: "", sets: [] };
+        listFilter = { mode: p.key, slot: "", mainStat: "", sets: [], q: listFilter.q || "" };   // 路径切换保留搜索（2026-10-15 批次 3）
         persistFilter();
         render();
       });
@@ -242,21 +269,23 @@
     });
 
     const condBox = el("div", "filter-cond");
-    const btnClear = el("button", "btn btn-sm", "✕ 清除");
+    const btnClear = el("button", "btn btn-sm", ico("close") + "清除");
 
     if (f.mode === "role") {
       // —— ① 按角色：套装多选（下拉 checkbox 面板；判定读角色套装字段 role.sets，不数件数）——
       const setBox = el("div", "set-filter");
       // 按钮文案：真实套装数 + 特殊项「其他」（分列，避免把「其他」算成一套）
       const setBtnText = () => {
-        if (!f.sets.length) return "套装 ▾";
+        if (!f.sets.length) return "套装";
         const n = f.sets.filter(s => s !== SET_FILTER_EMPTY).length;
         const parts = [];
         if (n) parts.push(`${n}套`);
         if (f.sets.includes(SET_FILTER_EMPTY)) parts.push("其他");
-        return `套装 ${parts.join("+")} ▾`;
+        return `套装 ${parts.join("+")}`;
       };
-      const setBtn = el("button", "btn btn-sm set-btn", setBtnText());
+      const setBtn = el("button", "btn btn-sm set-btn");
+      const refreshSetBtn = () => { setBtn.innerHTML = esc(setBtnText()) + ico("chevron-down"); };
+      refreshSetBtn();
       const panel = el("div", "set-dropdown hidden");
       const list = el("div", "set-list");
       // 勾选/取消的公共处理（真实套装项与「其他」特殊项共用）
@@ -264,7 +293,7 @@
         lab.querySelector("input").addEventListener("change", e => {
           if (e.target.checked) { if (!f.sets.includes(value)) f.sets.push(value); }
           else f.sets = f.sets.filter(s => s !== value);
-          setBtn.textContent = setBtnText();
+          refreshSetBtn();
           persistFilter();   // 持久化筛选（刷新/重开恢复）
           updateResults();   // 局部刷新，面板保持打开可连续勾选
         });
@@ -322,12 +351,22 @@
     }
 
     btnClear.addEventListener("click", () => {
-      // 清除当前路径的条件（保留所在路径），刷新后保持无条件
-      listFilter = { mode: listFilter.mode, slot: "", mainStat: "", sets: [] };
+      // 清除当前路径的条件与搜索（保留所在路径），刷新后保持无条件
+      listFilter = { mode: listFilter.mode, slot: "", mainStat: "", sets: [], q: "" };
       persistFilter();
       render();
     });
-    fBar.append(tabs, condBox, btnClear);
+    // 搜索框（2026-10-15 批次 3）：按角色名过滤，与双路径筛选 AND 叠加；贴行右（margin-left:auto）
+    const searchBox = el("div", "search-box");
+    searchBox.innerHTML = ico("search") +
+      `<input type="search" placeholder="搜索角色名" value="${esc(f.q || "")}" aria-label="搜索角色名">`;
+    const searchInput = searchBox.querySelector("input");
+    searchInput.addEventListener("input", () => {
+      listFilter.q = searchInput.value;
+      persistFilter();
+      updateResults();   // 局部刷新：不重建输入框，保持焦点
+    });
+    fBar.append(tabs, condBox, btnClear, searchBox);
     wrap.appendChild(fBar);
 
     // —— 结果区（信息 + 列表/空态），套装勾选时局部刷新 ——
@@ -341,11 +380,13 @@
       const sorted = [...filtered].sort((a, b) =>
         core.calcCharacterScore(b).percent - core.calcCharacterScore(a).percent);
       if (isActive()) {
+        const qq = (f.q || "").trim();
+        const segs = [];
+        if (f.mode === "role") { if (f.sets.length) segs.push(`套装 ${f.sets.map(setLabel).join("、")}`); }
+        else { if (f.slot) segs.push(`散件·${C.SLOTS[f.slot].name}`); if (f.mainStat) segs.push(f.mainStat); }
+        if (qq) segs.push(`搜索「${qq}」`);
         infoEl.textContent = `筛选 ${filtered.length}/${roles.length} 个角色` +
-          (f.mode === "role"
-            ? ` · 套装 ${f.sets.map(setLabel).join("、")}`
-            : (f.slot ? ` · 散件·${C.SLOTS[f.slot].name}` : "") + (f.mainStat ? ` · ${f.mainStat}` : "")) +
-          `，按分数降序`;
+          (segs.length ? ` · ${segs.join(" · ")}` : "") + `，按分数降序`;
         infoEl.style.display = "";
       } else {
         infoEl.style.display = "none";
@@ -353,12 +394,12 @@
       listWrap.innerHTML = "";
       if (sorted.length === 0) {
         const empty = el("div", "empty",
-          '<div class="icon" aria-hidden="true">🔍</div>' +
+          '<div class="icon" aria-hidden="true">' + ico("search") + '</div>' +
           '<div class="empty-title">没有符合筛选条件的角色</div>' +
           '<div class="empty-desc">试试调整筛选条件，或清除筛选查看全部角色。</div>');
-        const btnC = el("button", "btn", "✕ 清除筛选");
+        const btnC = el("button", "btn", ico("close") + "清除筛选");
         btnC.addEventListener("click", () => {
-          listFilter = { mode: listFilter.mode, slot: "", mainStat: "", sets: [] };
+          listFilter = { mode: listFilter.mode, slot: "", mainStat: "", sets: [], q: "" };
           persistFilter();   // 清除同样落盘，刷新后保持无条件
           render();
         });
@@ -388,11 +429,11 @@
     const grpNav = el("div", "btn-group");
     const grpMain = el("div", "btn-group");
     const grpDanger = el("div", "btn-group");
-    const btnBack = el("button", "btn btn-ghost", "← 返回");
-    const btnEditCfg = el("button", "btn", "⚙ 角色配置");
-    const btnEdit = el("button", "btn", "✎ 编辑");
-    const btnNew = el("button", "btn btn-primary", "＋ 录入新圣遗物");
-    const btnDelRole = el("button", "btn btn-danger", "🗑 删除");
+    const btnBack = el("button", "btn", ico("back") + "返回");   // 2026-10-15 用户反馈：幽灵样式与同排按钮不和谐 → 统一为次按钮
+    const btnEditCfg = el("button", "btn", ico("config") + "角色配置");
+    const btnEdit = el("button", "btn", ico("edit") + "编辑");
+    const btnNew = el("button", "btn", ico("plus") + "录入新圣遗物");   // 2026-10-15 用户反馈：与同排按钮统一（去主按钮金色）
+    const btnDelRole = el("button", "btn btn-danger", ico("trash") + "删除");
     btnBack.title = "返回角色列表";
     btnDelRole.title = "删除该角色（不可恢复）";
     btnBack.addEventListener("click", () => { view = { type: "list" }; render(); });
@@ -465,7 +506,7 @@
     const cons = core.checkSetConsistency(role);
     if (cons.checked && cons.mismatch) {
       const warn = el("div", "warn set-mismatch");
-      warn.innerHTML = `<span>⚠ 角色套装字段与圣遗物实况不一致：字段为「${esc(cSets.join(" + "))}」，` +
+      warn.innerHTML = `<span>${ico("warn")}角色套装字段与圣遗物实况不一致：字段为「${esc(cSets.join(" + "))}」，` +
         `实况为「${cons.actual.length ? esc(cons.actual.join(" + ")) : "其他（无法归入四件套 / 两个两件套）"}」。</span>`;
       const btnSync = el("button", "btn btn-sm", "按实况更新");
       btnSync.title = "把圣遗物的实际套装构成写回角色套装字段";
@@ -494,7 +535,7 @@
     const isLoose = role.looseSlot === slot;   // 散件部位：金色「散」角标视觉引导（不文字说明）
     if (!art) {
       const card = el("div", "artifact-card empty-art" + (isLoose ? " loose" : ""),
-        `<div style="text-align:center">＋<br>${C.SLOTS[slot].name}</div>`);
+        `<div class="ea-inner">${ico("slot-" + slot, "ea-ico")}<div>${C.SLOTS[slot].name}</div></div>`);
       card.addEventListener("click", () => openArtifactModal(role, slot, "new"));
       return card;
     }
@@ -504,7 +545,8 @@
     // 部位达成度百分比 = 单件词条数 / 该部位完美词条数；按得分给整卡着色边框
     const perfect = core.calcPerfect(slot, role);
     const pct = perfect > 0 ? (sScore / perfect) * 100 : 0;
-    const rankCls = pct > 80 ? "score-red" : pct > 70 ? "score-orange" : pct > 60 ? "score-purple" : pct > 50 ? "score-blue" : "score-green";
+    // 达成度五档（2026-10-15 批次 4，决策 4A）：金 > 橙 > 紫 > 蓝 > 灰——红还给警示、绿还给有效
+    const rankCls = pct > 80 ? "score-gold" : pct > 70 ? "score-orange" : pct > 60 ? "score-purple" : pct > 50 ? "score-blue" : "score-gray";
     card.classList.add(rankCls);
 
     let subsHtml = "";
@@ -521,7 +563,7 @@
 
     card.innerHTML =
       `<div class="a-head">` +
-      `<span class="a-slot">${C.SLOTS[slot].name}${isLoose ? ' <i class="a-loose-tag">散</i>' : ""}</span>` +
+      `<span class="a-slot">${ico("slot-" + slot)}${C.SLOTS[slot].name}${isLoose ? ' <i class="a-loose-tag">散</i>' : ""}</span>` +
       `<span class="a-level">Lv.${art.level}</span></div>` +
       `<div class="a-set">${esc(art.set)}</div>` +
       `<div class="a-main">${esc(art.mainStat)}</div>` +
@@ -530,6 +572,9 @@
       `<span class="a-score">${sScore.toFixed(2)} 词条</span>` +
       `<span class="a-pct ${rankCls}">${pct.toFixed(1)}%</span>` +
       `</div>`;
+
+    // 2026-10-15 批次 5：点已有卡 = 打开该部位编辑弹窗（与空卡「点击录入」对称；键盘可达）
+    makeActivatable(card, () => openArtifactModal(role, slot, "edit"), `编辑 ${C.SLOTS[slot].name}`);
 
     return card;
   }
@@ -541,7 +586,7 @@
     C.SLOT_KEYS.forEach(slot => {
       const art = role.artifacts[slot];
       const btn = el("button", "btn" + (art ? "" : " slot-empty"),
-        `${C.SLOTS[slot].name}${art ? ` · ${esc(C.MAIN_SHORT[art.mainStat] || art.mainStat)}` : "（未录）"}`);
+        `${ico("slot-" + slot)}${C.SLOTS[slot].name}${art ? ` · ${esc(C.MAIN_SHORT[art.mainStat] || art.mainStat)}` : "（未录）"}`);
       btn.addEventListener("click", () => {
         closeModal();
         openArtifactModal(role, slot, "edit");
@@ -734,7 +779,7 @@
             `<select class="stat">${opts}</select>` +
             valueCtrl +
             `<span class="act"><input type="checkbox" ${checked} ${actDisabled}>${actLabel}</span>` +
-            `<button class="rm" title="删除行">✕</button>`;
+            `<button class="rm" title="删除行">${ico("close")}</button>`;
           if (formState.level >= 4) row.querySelector(".act").title = "4 级以上无待激活词条";
           row.querySelector(".stat").addEventListener("change", e => {
             s.stat = e.target.value;
@@ -757,7 +802,7 @@
           });
           subRows.appendChild(row);
         });
-        const addBtn = el("button", "btn btn-sm", "＋ 添加副词条");
+        const addBtn = el("button", "btn btn-sm", ico("plus") + "添加副词条");
         addBtn.addEventListener("click", () => {
           if (formState.substats.length < 4) {
             formState.substats.push({ stat: "", value: "", activated: true });
@@ -1009,8 +1054,8 @@
     const res = core.evaluateArtifact(art, role);
     const sum = el("div", "eval-summary " +
       (res.valuable ? "valuable" : (res.results.length === 0 ? "no-case" : "no-value")));
-    sum.textContent = res.valuable ? "✓ 有价值"
-      : (res.results.length === 0 ? "⚠ 无适用场景（该部位不是散件/自由位，且无同套装同主词条的已穿戴件）" : "✗ 无价值");
+    sum.innerHTML = res.valuable ? ico("check") + "有价值"
+      : (res.results.length === 0 ? ico("warn") + "无适用场景（该部位不是散件/自由位，且无同套装同主词条的已穿戴件）" : ico("close") + "无价值");
     box.appendChild(sum);
 
     if (res.results.length === 0) {
@@ -1022,7 +1067,7 @@
       const verdictCls = r.worthy ? "badge-green" : "badge-gray";
       const diffCls = r.diffToCurrent >= 0 ? "diff-pos" : "diff-neg";
       const setSwapWarn = r.isSetSwap
-        ? `<div class="warn" style="margin-top:8px">⚠ 替换后该部位将变为「${esc(art.set)}」套装件，角色将失去散件（散件部位将置空）</div>`
+        ? `<div class="warn" style="margin-top:8px">${ico("warn")}替换后该部位将变为「${esc(art.set)}」套装件，角色将失去散件（散件部位将置空）</div>`
         : "";
       card.innerHTML =
         `<div class="c-head"><span class="c-title">${caseLabel(r)}</span>` +
@@ -1128,10 +1173,10 @@
     const roles = store.getRoles();
     if (roles.length === 0) {
       const empty = el("div", "empty",
-        '<div class="icon" aria-hidden="true">⚖️</div>' +
+        '<div class="icon" aria-hidden="true">' + ico("eval") + '</div>' +
         '<div class="empty-title">还没有角色数据</div>' +
         '<div class="empty-desc">请先创建角色或导入数据，再对新的圣遗物进行价值评估。</div>');
-      const btn = el("button", "btn btn-primary", "＋ 新建角色");
+      const btn = el("button", "btn btn-primary", ico("plus") + "新建角色");
       btn.addEventListener("click", createRoleFlow);
       empty.appendChild(btn);
       wrap.appendChild(empty);
@@ -1148,7 +1193,7 @@
       // 无待评估新圣遗物：提示 + 录入入口
       const box = el("div", "eval-case");
       box.innerHTML = `<div class="c-head"><span class="c-title">录入要评估的新圣遗物</span></div>`;
-      const btn = el("button", "btn btn-primary", "＋ 录入新圣遗物");
+      const btn = el("button", "btn btn-primary", ico("plus") + "录入新圣遗物");
       btn.addEventListener("click", () => openArtifactModal(roles[0], null, "new"));
       box.appendChild(btn);
       wrap.appendChild(box);
@@ -1172,12 +1217,12 @@
     // 汇总
     const sum = el("div", "eval-summary " + (valuable.length ? "valuable" : "no-value"));
     if (valuable.length) {
-      sum.textContent = `✓ 评估 ${roles.length} 个角色：${valuable.length} 个角色有提升` +
+      sum.innerHTML = ico("check") + `评估 ${roles.length} 个角色：${valuable.length} 个角色有提升` +
         (hiddenCount > 0 ? `（已手动移除 ${hiddenCount} 个）` : "");
     } else if (hiddenCount > 0) {
       sum.textContent = `已手动移除全部有提升角色，暂无更多提升项（共评估 ${roles.length} 个角色）`;
     } else {
-      sum.textContent = `✗ 评估 ${roles.length} 个角色：均无提升（词条不足或无适用场景）`;
+      sum.innerHTML = ico("close") + `评估 ${roles.length} 个角色：均无提升（词条不足或无适用场景）`;
     }
     wrap.appendChild(sum);
 
@@ -1222,13 +1267,13 @@
             (r.tags.length ? `<span class="badge ${erTagCls(r.erTagLevel)}">${esc(r.tags[0])}</span>` : "") +
           `</span>`;
         // 点击角色名 → 跳转该角色详情页（评估临时对象保留，返回评估页结果仍在）
-        row.querySelector(".row-role").addEventListener("click", () => {
+        makeActivatable(row.querySelector(".row-role"), () => {
           view = { type: "detail", roleId: role.id };
           render();
-        });
+        }, `查看 ${role.name} 详情`);
         // 操作区（最右列，两端对齐）：手动移除 + 替换（仅满级圣遗物）
         const actions = el("div", "row-actions");
-        const btnHide = el("button", "btn btn-sm btn-hide", "✕");
+        const btnHide = el("button", "btn btn-sm btn-hide", ico("close"));
         btnHide.title = "从有提升列表移除";
         btnHide.addEventListener("click", () => {
           evalHidden.add(role.id);
@@ -1346,10 +1391,10 @@
       `<span class="rm-action"><i class="rm-case">${ci.label}</i><b class="rm-role" title="点击查看该角色详情">${esc(best.role.name)}</b></span>` +
       `<span class="rm-flow">现状 ${r.currentScore.toFixed(2)} <i class="rm-arrow">→</i> 期望 <b>${r.eRemodel.toFixed(2)}</b></span>`;
     card.appendChild(main);
-    main.querySelector(".rm-role").addEventListener("click", () => {
+    makeActivatable(main.querySelector(".rm-role"), () => {
       view = { type: "detail", roleId: best.role.id };
       render();
-    });
+    }, `查看 ${best.role.name} 详情`);
 
     // 操作行：建议指定 + 尘耗/效率（重塑时的操作指引）
     const op = el("div", "rm-op");
@@ -1359,7 +1404,7 @@
     card.appendChild(op);
 
     // 偏差提示（仅转移/晋升显示，短句）
-    if (ci.note) card.appendChild(el("div", "rm-note", "ⓘ " + ci.note));
+    if (ci.note) card.appendChild(el("div", "rm-note", ico("info") + ci.note));
 
     // 折叠详情：保底线 / 组合上限 / 期望达成度 + 全部可评估对象
     const det = el("details", "rm-detail");
@@ -1376,10 +1421,10 @@
           `<span class="ra-name"><i class="rm-case">${kindLabel}·</i>${esc(t.role.name)}</span>` +
           `<span class="ra-rv ${t.r.rv >= 0 ? "diff-pos" : "diff-neg"}">${t.r.rv >= 0 ? "+" : ""}${t.r.rv.toFixed(2)}</span>` +
           `<span class="ra-flow">${t.r.currentScore.toFixed(2)} → ${t.r.eRemodel.toFixed(2)}</span>`;
-        line.querySelector(".ra-name").addEventListener("click", () => {
+        makeActivatable(line.querySelector(".ra-name"), () => {
           view = { type: "detail", roleId: t.role.id };
           render();
-        });
+        }, `查看 ${t.role.name} 详情`);
         det.appendChild(line);
       });
       if (row.all.length > 8) {
@@ -1392,7 +1437,7 @@
 
     // 会话内移除（仅新录入件）
     if (!row.sourceRole) {
-      const rm = el("button", "btn btn-sm rm-del", "✕ 移除");
+      const rm = el("button", "btn btn-sm rm-del", ico("close") + "移除");
       rm.title = "从重塑分析列表移除该新录入件";
       rm.addEventListener("click", () => {
         remodelTempList = remodelTempList.filter(a => a.id !== art.id);
@@ -1413,10 +1458,10 @@
 
     if (roles.length === 0) {
       const empty = el("div", "empty",
-        '<div class="icon" aria-hidden="true">♻️</div>' +
+        '<div class="icon" aria-hidden="true">' + ico("remodel") + '</div>' +
         '<div class="empty-title">还没有角色数据</div>' +
         '<div class="empty-desc">重塑分析基于角色配置（有效词条与权值）判断哪些满级圣遗物值得消耗启圣之尘重塑。请先创建角色或导入数据。</div>');
-      const btn = el("button", "btn btn-primary", "＋ 新建角色");
+      const btn = el("button", "btn btn-primary", ico("plus") + "新建角色");
       btn.addEventListener("click", createRoleFlow);
       empty.appendChild(btn);
       wrap.appendChild(empty);
@@ -1434,7 +1479,7 @@
       `<option value="4">谕告（保底 4 次）</option>`;
     kSel.value = String(remodelK);
     kSel.addEventListener("change", e => { remodelK = parseInt(e.target.value, 10) || 2; render(); });
-    const btnNew = el("button", "btn btn-primary", "＋ 录入新圣遗物");
+    const btnNew = el("button", "btn btn-primary", ico("plus") + "录入新圣遗物");
     btnNew.title = "录入满级新圣遗物加入本次分析（会话内有效，不写入角色）";
     btnNew.addEventListener("click", () => openArtifactModal(null, null, "remodel"));
     // 三情况开关：关闭的类型不参与评估，每件在开启范围内重新取 RV 最优行动（会话内状态，不落盘）
@@ -1489,16 +1534,16 @@
     const excluded = kindsOn.length ? allCands.length - rows.length : 0;
 
     const sum = el("div", "eval-summary " + (worth.length ? "valuable" : "no-case"));
-    sum.textContent = kindsOn.length
-      ? `✓ 扫描 ${allCands.length} 件满级圣遗物（含新录入 ${remodelTempList.length} 件${collCandCount ? ` · 藏品 ${collCandCount} 件` : ""}）：${worth.length} 件有重塑价值（RV > 0）` +
+    sum.innerHTML = kindsOn.length
+      ? ico("check") + `扫描 ${allCands.length} 件满级圣遗物（含新录入 ${remodelTempList.length} 件${collCandCount ? ` · 藏品 ${collCandCount} 件` : ""}）：${worth.length} 件有重塑价值（RV > 0）` +
         (excluded ? `；${excluded} 件无可评估对象未列入（散件/藏品无宿主等）` : "")
-      : "⚠ 三种情况类型均已关闭：无行动可评估，请至少开启一种（原地强化 / 同套转移 / 晋升套装件）。";
+      : ico("warn") + "三种情况类型均已关闭：无行动可评估，请至少开启一种（原地强化 / 同套转移 / 晋升套装件）。";
     wrap.appendChild(sum);
 
     const shown = remodelShowAll ? rows : worth;
     if (!shown.length) {
       wrap.appendChild(el("div", "empty",
-        '<div class="icon" aria-hidden="true">✨</div>' +
+        '<div class="icon" aria-hidden="true">' + ico("sparkles") + '</div>' +
         '<div class="empty-title">暂无有重塑价值的圣遗物</div>' +
         '<div class="empty-desc">RV ≤ 0 表示当前分配已接近该组合的重塑期望（托底不抬天花板）。可勾选「显示无价值件」查看全部，或录入新圣遗物。</div>'));
     } else {
@@ -1664,7 +1709,7 @@
       "藏品件不参与角色评分，但会参与价值评估的「藏品视角」与重塑分析。"));
 
     const ctrl = el("div", "filter-bar");
-    const btnNew = el("button", "btn btn-primary", "＋ 录入藏品");
+    const btnNew = el("button", "btn btn-primary", ico("plus") + "录入藏品");
     btnNew.addEventListener("click", () => openArtifactModal(null, null, "collection"));
     // 部位快速跳转（26 桶铺开来很长，靠它直达到部位）
     const nav = el("div", "coll-nav");
@@ -1687,7 +1732,7 @@
       if (!buckets.length) return;
       const sec = el("div", "coll-slot");
       sec.dataset.slot = slot;
-      sec.appendChild(el("div", "coll-slot-title", C.SLOTS[slot].name));
+      sec.appendChild(el("div", "coll-slot-title", ico("slot-" + slot) + C.SLOTS[slot].name));
       // 桶卡片 + 四列行（维度 | 值 | 极限度 | 持有件）——回退合并单元格方案
       buckets.forEach(b => {
         const dims = C.collectionBucketDims(b);
@@ -1708,18 +1753,26 @@
           if (h) {
             row.dataset.cid = h.arts[0].id;
             row.title = "点击编辑这件藏品";
+            row.tabIndex = 0;                       // 键盘可达（2026-10-15 批次 3）
+            row.setAttribute("role", "button");
+            row.setAttribute("aria-label", "编辑该件藏品");
           }
           rows.appendChild(row);
         });
         card.appendChild(rows);
         sec.appendChild(card);
       });
-      // 事件委托：每个部位区块只挂 1 个 click（避免 95×4 个监听器）
-      sec.addEventListener("click", e => {
-        const row = e.target.closest("[data-cid]");
+      // 事件委托：每个部位区块只挂 1 组监听（click + keydown），避免 95×4 个监听器
+      const openCollRow = row => {
         if (!row) return;
         const item = store.getCollection().find(i => i.id === row.dataset.cid);
         if (item) openArtifactModal(null, null, "collectionEdit", item);
+      };
+      sec.addEventListener("click", e => openCollRow(e.target.closest("[data-cid]")));
+      sec.addEventListener("keydown", e => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        const row = e.target.closest("[data-cid]");
+        if (row) { e.preventDefault(); openCollRow(row); }
       });
       wrap.appendChild(sec);
     });
@@ -1871,6 +1924,19 @@
 
   // ============ 导入 / 导出 ============
   function setupIO() {
+    // 「更多」菜单（2026-10-15 批次 5）：导入 / 导出收纳；点外 / Esc 关闭
+    const moreWrap = document.querySelector(".more-wrap");
+    const moreBtn = $("#btnMore");
+    const moreDrop = $("#moreDropdown");
+    const setMoreOpen = open => {
+      moreDrop.classList.toggle("hidden", !open);
+      moreBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    };
+    moreBtn.addEventListener("click", e => { e.stopPropagation(); setMoreOpen(moreDrop.classList.contains("hidden")); });
+    document.addEventListener("click", e => { if (!moreWrap.contains(e.target)) setMoreOpen(false); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") setMoreOpen(false); });
+    moreDrop.querySelectorAll(".more-item").forEach(b => b.addEventListener("click", () => setMoreOpen(false)));
+
     $("#btnExport").addEventListener("click", () => {
       const storeObj = store.getStore();
       if (storeObj.roles.length === 0) { feedback.toast("暂无数据可导出", "warn"); return; }
@@ -1947,6 +2013,15 @@
     $("#btnCollection").addEventListener("click", () => {
       view = { type: "collection" };
       render();
+    });
+
+    // 「/」聚焦首页搜索框（2026-10-15 批次 3；输入态中不劫持）
+    document.addEventListener("keydown", e => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      const box = document.querySelector(".search-box input");
+      if (box) { e.preventDefault(); box.focus(); }
     });
 
     $("#logoBtn").addEventListener("click", () => {

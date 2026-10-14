@@ -124,7 +124,8 @@
   }
 
   // —— 首页筛选状态持久化（刷新 / 重新打开页面时恢复上次筛选）——
-  // 结构：{ mode: "role" | "loose", slot, mainStat, sets }
+  // 结构：{ mode: "role" | "loose", slot, mainStat, sets, q }
+  //   q = 搜索关键词（2026-10-15 批次 3 新增；与两条路径正交，路径切换时保留）
   //   mode = "role"  按角色路径：只筛套装（sets）
   //   mode = "loose" 按散件路径：只筛散件部位（slot）与主词条（mainStat）
   // 两条路径互斥（切换即清空另一路），故落盘时只保留当前路条件。
@@ -138,12 +139,13 @@
       const slot = typeof d.slot === "string" ? d.slot : "";
       const mainStat = typeof d.mainStat === "string" ? d.mainStat : "";
       const sets = Array.isArray(d.sets) ? d.sets.filter(s => typeof s === "string") : [];
+      const q = typeof d.q === "string" ? d.q : "";
       const mode = (d.mode === "loose" || d.mode === "role")
         ? d.mode
         : ((slot || mainStat) ? "loose" : "role");
       return mode === "loose"
-        ? { mode, slot, mainStat, sets: [] }               // 按散件：套装条件不参与（互斥）
-        : { mode, slot: "", mainStat: "", sets };          // 按角色：件级条件不参与（互斥）
+        ? { mode, slot, mainStat, sets: [], q }            // 按散件：套装条件不参与（互斥）
+        : { mode, slot: "", mainStat: "", sets, q };       // 按角色：件级条件不参与（互斥）
     } catch (e) {
       return null;   // 损坏数据 → 返回 null，由调用方回退默认筛选
     }
@@ -151,9 +153,10 @@
   function saveFilter(f) {
     try {
       const mode = (f && f.mode === "loose") ? "loose" : "role";
+      const q = (f && typeof f.q === "string") ? f.q : "";
       const data = mode === "loose"
-        ? { mode, slot: (f && f.slot) || "", mainStat: (f && f.mainStat) || "", sets: [] }
-        : { mode, slot: "", mainStat: "", sets: (f && Array.isArray(f.sets)) ? f.sets : [] };
+        ? { mode, slot: (f && f.slot) || "", mainStat: (f && f.mainStat) || "", sets: [], q }
+        : { mode, slot: "", mainStat: "", sets: (f && Array.isArray(f.sets)) ? f.sets : [], q };
       localStorage.setItem(FILTER_KEY, JSON.stringify(data));
       return true;
     } catch (e) {

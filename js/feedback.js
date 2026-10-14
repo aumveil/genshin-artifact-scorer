@@ -37,7 +37,7 @@
     if (opts.size) modal.classList.add("modal-" + opts.size);
 
     const head = el("div", "modal-head",
-      `<h3>${titleHtml}</h3><button class="modal-close" title="关闭" aria-label="关闭">✕</button>`);
+      `<h3>${titleHtml}</h3><button class="modal-close" title="关闭" aria-label="关闭"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>`);
     head.querySelector(".modal-close").addEventListener("click", () => closeModal());
     modal.appendChild(head);
 

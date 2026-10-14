@@ -35,6 +35,7 @@
   --text-1: #ffffff;                       /* label */
   --text-2: rgba(235, 235, 245, 0.78);     /* secondaryLabel 加强 */
   --text-3: rgba(235, 235, 245, 0.55);     /* tertiaryLabel 加强 ≈ 5.2:1 */
+  --text-3-hi: rgba(235, 235, 245, 0.62);  /* 弱化文字·亮一档：bg-2 行底专用（0.55 在其上仅 4.68:1；2026-10-15 批次 1） */
 
   /* 语义色 = Apple 系统色（深色模式） */
   --green: #30d158;
@@ -47,13 +48,30 @@
   --red-soft: #ff6961;         /* 深底上可读的红（systemRed 偏暗） */
   --red-soft-hi: #ff8a84;
 
+  /* 语义色「文字专用」ink 变体（2026-10-15 批次 0）：深色主题 = 原色（零变化）；
+     浅色主题在文件末尾覆盖为加深版——文字用 ink，底色 / 填充 / 图形仍用原色 */
+  --green-ink: var(--green);
+  --yellow-ink: var(--yellow);
+  --red-ink: var(--red-soft);
+  --orange-ink: var(--orange);
+  --purple-ink: var(--purple);
+  --blue-ink: var(--blue);
+  --gray-ink: var(--gray);
+
+  /* 达成度「金 / 橙」档（2026-10-15 批次 4 决策 4A；同日复核调整）：
+     原「品牌淡金 e8c46a + 霓虹橙 ff9f0a」被判「金橙难分、橙看着更高」——层级改由明度/纯度承担：
+     金 = 明亮纯金（亮），橙 = 深琥珀（沉）。 --orange 保留于调色板备用，橙档转用下方 token。 */
+  --grade-gold: #ffcf33;
+  --grade-gold-ink: #ffdd6e;
+  --grade-orange: #d97706;
+  --grade-orange-ink: #e08614;
+
   /* 字体：Apple 字体栈（Mac 落到 SF Pro / 苹方，Windows 落到 Segoe UI / 雅黑） */
   --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text",
              "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
   --font-num: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
 
-  /* 字号梯度（Apple 的 Title2 = 22px；大数字 48px） */
-  --fs-xs: 11px;
+  /* 字号梯度（Apple 的 Title2 = 22px；大数字 48px；2026-10-15 批次 1：12px 下限——原 --fs-xs 11px 并入 --fs-sm） */
   --fs-sm: 12px;
   --fs-md: 13px;
   --fs-base: 14px;
@@ -178,6 +196,30 @@ body { background: var(--bg-0); }
 }
 .topbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* 「更多」菜单（2026-10-15 批次 5）：低频操作收纳（导入 / 导出） */
+.more-wrap { position: relative; display: inline-flex; }
+.more-btn { width: 34px; height: 34px; padding: 0; justify-content: center; }
+.more-dropdown {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+  min-width: 132px; padding: 5px;
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--glass-3);
+  backdrop-filter: saturate(180%) blur(24px);
+  -webkit-backdrop-filter: saturate(180%) blur(24px);
+  border: 1px solid var(--line-1); border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+}
+.more-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border: none; border-radius: 6px;
+  background: none; color: var(--text-1);
+  font-family: inherit; font-size: var(--fs-md);
+  cursor: pointer; text-align: left; white-space: nowrap;
+  transition: background var(--t-fast) var(--ease);
+}
+.more-item:hover { background: var(--fill-1); }
+.more-item:focus-visible { outline: none; box-shadow: var(--glow-gold); }
+
 /* ============================== 4. 按钮体系 ============================== */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
@@ -208,13 +250,11 @@ body { background: var(--bg-0); }
 .btn-danger {
   background: color-mix(in srgb, var(--red) 16%, transparent);
   border: none;
-  color: var(--red-soft);
+  color: var(--red-ink);
 }
 .btn-danger:hover { background: color-mix(in srgb, var(--red) 26%, transparent); color: #ffffff; }
 
-/* 幽灵 / 图标按钮 */
-.btn-ghost { background: transparent; color: var(--text-2); }
-.btn-ghost:hover { background: var(--fill-1); color: var(--text-1); }
+/* 图标按钮（`.btn-ghost` 幽灵变体已于 2026-10-15 删除：唯一使用处「返回」统一为次按钮） */
 .btn-icon { padding: 7px; border-radius: var(--r-md); }
 
 /* 尺寸 */
@@ -234,6 +274,14 @@ body { background: var(--bg-0); }
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: none; }
 }
+/* 视图切换方向感（2026-10-15 批次 5）：进入详情右滑入 / 详情→列表左滑入 / 其余视图间原地淡入。
+   动画施加在**视图子节点**（> *）而非 .app 本体——位移落在 .app 的 20px 内边距内，
+   任何宽度下都不越出视口（.app 本体位移会令窄屏动画期间出现 20px 可横滚区，终审已修正）。 */
+.app.v-fwd > * { animation: view-in-right var(--t-md) var(--ease); }
+.app.v-back > * { animation: view-in-left var(--t-md) var(--ease); }
+.app.v-lat > * { animation: app-fade-in var(--t-md) var(--ease); }
+@keyframes view-in-right { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
+@keyframes view-in-left { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: none; } }
 
 /* ============================== 6. 空状态 ============================== */
 .empty {
@@ -275,7 +323,8 @@ body { background: var(--bg-0); }
 .filter-bar .ftab:hover { color: var(--text-1); }
 /* 选中段 = 灰白凸起（Apple 深色分段控件的选中样式） */
 .filter-bar .ftab.active {
-  color: var(--text-1); background: var(--gray);
+  /* 2026-10-15 批次 4 终检修复：深色下白字在 #8e8e93 段上仅 3.26:1 → 改深色文字（双主题实测 5.22:1） */
+  color: #1c1c1e; background: var(--gray);
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12);
 }
 /* 当前路径的条件区（与标签页以淡竖线分隔） */
@@ -328,6 +377,29 @@ body { background: var(--bg-0); }
 .set-item-none { color: var(--text-2); }
 .set-item-none:hover { background: var(--fill-1); }
 
+/* 搜索框（2026-10-15 批次 3）：按角色名过滤；贴行右（margin-left:auto），窄屏整行 */
+.search-box {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 11px;
+  background: var(--bg-3); border-radius: var(--r-sm);
+  color: var(--text-3);
+  transition: box-shadow var(--t-fast) var(--ease);
+}
+.search-box:focus-within { box-shadow: var(--glow-gold); }
+.search-box input {
+  width: 150px; padding: 0; border: none; background: none; outline: none;
+  color: var(--text-1); font-size: var(--fs-md); font-family: inherit;
+}
+.search-box input::placeholder { color: var(--text-3); }
+.search-box input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
+/* 键盘焦点样式（2026-10-15 批次 3）：与全站光环一致 */
+.filter-bar .ftab:focus-visible, .filter-bar .set-btn:focus-visible,
+.row-role:focus-visible, .rm-role:focus-visible, .ra-name:focus-visible, .coll-row:focus-visible {
+  outline: none; box-shadow: var(--glow-gold); border-radius: 5px;
+}
+
 .filter-info {
   font-size: var(--fs-sm); color: var(--text-3); margin-bottom: 10px;
   padding-left: 4px;
@@ -351,11 +423,12 @@ body { background: var(--bg-0); }
 .role-card:focus-visible { outline: none; box-shadow: var(--glow-gold); }
 
 .role-card .rc-line {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-right: 30px;
+  /* 2026-10-15 批次 0：移除删除按钮时代遗留的 padding-right:30px（左右内缩不对称） */
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
 .role-card .rc-name {
   font-size: 16px; font-weight: 600; white-space: nowrap;
-  width: 86px; overflow: hidden; text-overflow: ellipsis;
+  width: 104px; overflow: hidden; text-overflow: ellipsis;   /* 2026-10-15：86→104，容纳五字名（「梦见月瑞希」等）；超长仍省略 */
   color: var(--text-1); letter-spacing: -0.01em;
 }
 
@@ -376,7 +449,7 @@ body { background: var(--bg-0); }
   letter-spacing: -0.02em;   /* Apple 的大字号用收紧字距 */
 }
 .role-card .rc-score em {
-  font-size: 11px; font-style: normal; color: var(--text-3); margin-left: 2px;
+  font-size: 12px; font-style: normal; color: var(--text-3); margin-left: 2px;
   font-weight: 400; -webkit-text-fill-color: var(--text-3);
 }
 .role-card .rc-sep { width: 1px; height: 20px; background: var(--line-1); flex: none; }
@@ -406,7 +479,7 @@ body { background: var(--bg-0); }
 /* 部位徽章：统一中性底，按部位着色（散件再叠金色） */
 .role-card .part {
   width: 88px; text-align: center;
-  font-size: 11.5px; padding: 3px 6px; border-radius: var(--r-sm);
+  font-size: 12px; padding: 3px 6px; border-radius: var(--r-sm);
   background: var(--fill-3); border: none;
   color: var(--text-2); white-space: nowrap;
   transition: background var(--t-fast) var(--ease);
@@ -421,10 +494,11 @@ body { background: var(--bg-0); }
   font-size: var(--fs-sm); line-height: 1.5; font-weight: 600;
   border: none;
 }
-.badge-green { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
-.badge-yellow { background: color-mix(in srgb, var(--yellow) 18%, transparent); color: var(--yellow); }
-.badge-red { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red-soft); }
-.badge-gray { background: color-mix(in srgb, var(--gray) 22%, transparent); color: var(--gray); }
+/* 2026-10-15 批次 0：文字色走 ink 变体（浅色下加深达标；深色 = 原色零变化） */
+.badge-green { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green-ink); }
+.badge-yellow { background: color-mix(in srgb, var(--yellow) 18%, transparent); color: var(--yellow-ink); }
+.badge-red { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red-ink); }
+.badge-gray { background: color-mix(in srgb, var(--gray) 22%, transparent); color: var(--gray-ink); }
 
 /* ============================== 10. 角色详情 ============================== */
 .detail-head {
@@ -483,7 +557,7 @@ body { background: var(--bg-0); }
   font-style: normal; color: var(--text-3); font-weight: 400;
   font-size: var(--fs-sm); margin-left: 8px;
 }
-.score-overview .ov-item .val i.warn { color: var(--yellow); margin-left: 10px; }
+.score-overview .ov-item .val i.warn { color: var(--yellow-ink); margin-left: 10px; }
 .score-overview .ov-eff b {
   color: var(--text-1); font-weight: 600; margin-right: 6px;
   padding: 1px 7px; border-radius: 20px;
@@ -500,6 +574,13 @@ body { background: var(--bg-0); }
   display: grid; gap: 16px;
   grid-template-columns: repeat(auto-fill, minmax(225px, 1fr));
 }
+/* 宽屏 5 列（2026-10-15 批次 3，决策 3A）：≥1180px 时 5 个部位卡一行放下（约 219px/张）；
+   同步收紧副词条列（52→50 / 48→44），为「元素充能效率」等长词条保留宽度。 */
+@media (min-width: 1180px) {
+  .artifact-grid { grid-template-columns: repeat(5, 1fr); }
+  /* 收窄列声明需高于基类 .artifact-card li 的特异性（媒体块位于基类规则之前） */
+  .artifact-grid .artifact-card li { grid-template-columns: 1fr 50px 44px auto; }
+}
 .artifact-card {
   position: relative;
   background: var(--bg-1);
@@ -509,9 +590,11 @@ body { background: var(--bg-0); }
   padding: 14px;
   display: flex; flex-direction: column;
   transition: background var(--t-fast) var(--ease);
+  cursor: pointer;   /* 2026-10-15 批次 5：整卡点击 = 编辑（空卡 = 录入） */
 }
 
 .artifact-card:hover { background: var(--bg-2); }
+.artifact-card:focus-visible { outline: none; box-shadow: var(--glow-gold); }
 
 /* 空位卡 */
 .artifact-card.empty-art {
@@ -531,7 +614,7 @@ body { background: var(--bg-0); }
 .artifact-card .a-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .artifact-card .a-slot { font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; }
 .artifact-card .a-loose-tag {
-  font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 5px;
+  font-style: normal; font-size: 12px; padding: 1px 6px; border-radius: 5px;
   border: none; color: var(--brand); margin-left: 6px;
   background: var(--accent-soft-2); font-weight: 600;
 }
@@ -552,16 +635,16 @@ body { background: var(--bg-0); }
   color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .artifact-card li .val { font-weight: 600; text-align: right; }
-.artifact-card li.effective .val { color: var(--green); }
+.artifact-card li.effective .val { color: var(--green-ink); }
 .artifact-card li.ineffective .val { color: var(--text-3); }
 .artifact-card li.ineffective .stat { color: var(--text-3); }
 .artifact-card li.pending .val { color: var(--text-3); font-style: italic; opacity: 0.8; }
 .artifact-card .rolls {
-  font-size: 11px; color: var(--text-3); text-align: right;
+  font-size: 12px; color: var(--text-3); text-align: right;
   font-family: var(--font-num);
 }
 .artifact-card .pending-tag {
-  font-size: 10px; color: var(--yellow); white-space: nowrap;
+  font-size: 12px; color: var(--yellow-ink); white-space: nowrap;
   background: color-mix(in srgb, var(--yellow) 12%, transparent); padding: 0 5px; border-radius: 4px;
   border: 1px solid color-mix(in srgb, var(--yellow) 30%, transparent);
 }
@@ -575,17 +658,18 @@ body { background: var(--bg-0); }
 }
 .artifact-card .a-pct { font-size: 15px; font-weight: 700; font-family: var(--font-num); }
 
-/* 部位达成度边框分级：>80 红 / 70~80 橙 / 60~70 紫 / 50~60 蓝 / <50 绿（加微光晕） */
-.artifact-card.score-red { border-left-color: var(--red); }
-.artifact-card.score-orange { border-left-color: var(--orange); }
+/* 部位达成度边框分级（2026-10-15 批次 4，决策 4A）：>80 金 / 70~80 橙 / 60~70 紫 / 50~60 蓝 / <50 灰
+   —— 红专用于警示（充能不足 / 删除 / 负向差）、绿专用于有效（词条 / 达标 / 正向差），全站色义不再翻转。 */
+.artifact-card.score-gold { border-left-color: var(--grade-gold); }
+.artifact-card.score-orange { border-left-color: var(--grade-orange); }
 .artifact-card.score-purple { border-left-color: var(--purple); }
 .artifact-card.score-blue { border-left-color: var(--blue); }
-.artifact-card.score-green { border-left-color: var(--green); }
-.artifact-card .a-pct.score-red { color: var(--red-soft); }
-.artifact-card .a-pct.score-orange { color: var(--orange); }
-.artifact-card .a-pct.score-purple { color: var(--purple); }
-.artifact-card .a-pct.score-blue { color: var(--blue); }
-.artifact-card .a-pct.score-green { color: var(--green); }
+.artifact-card.score-gray { border-left-color: var(--gray); }
+.artifact-card .a-pct.score-gold { color: var(--grade-gold-ink); }
+.artifact-card .a-pct.score-orange { color: var(--grade-orange-ink); }
+.artifact-card .a-pct.score-purple { color: var(--purple-ink); }
+.artifact-card .a-pct.score-blue { color: var(--blue-ink); }
+.artifact-card .a-pct.score-gray { color: var(--gray-ink); }
 .artifact-card .a-actions { display: flex; gap: 6px; }
 
 /* ============================== 12. 弹窗 ============================== */
@@ -626,7 +710,7 @@ body { background: var(--bg-0); }
   background: none; border: none; color: var(--text-3);
   font-size: 17px; cursor: pointer; transition: all var(--t-fast) var(--ease);
 }
-.modal-close:hover { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red-soft); }
+.modal-close:hover { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red-ink); }
 .modal-body { padding: 20px; }
 .modal-foot {
   padding: 13px 20px; border-top: 1px solid var(--line-1);
@@ -640,9 +724,9 @@ body { background: var(--bg-0); }
 .confirm-detail { font-size: var(--fs-md); color: var(--text-3); margin-top: 6px; line-height: 1.6; }
 .info-body { font-size: var(--fs-base); color: var(--text-1); line-height: 1.7; word-break: break-word; }
 .info-body .warn, .info-body .err-box { margin-bottom: 8px; }
-.info-error { color: var(--red-soft); }
-.info-success { color: var(--green); }
-.info-warn { color: var(--yellow); }
+.info-error { color: var(--red-ink); }
+.info-success { color: var(--green-ink); }
+.info-warn { color: var(--yellow-ink); }
 .info-info { color: var(--text-2); }
 
 /* Toast 通知 */
@@ -691,7 +775,7 @@ body { background: var(--bg-0); }
   box-shadow: var(--glow-gold);
 }
 .field input::placeholder, .field textarea::placeholder { color: var(--text-3); }
-.field .err { color: var(--red-soft); font-size: var(--fs-sm); margin-top: 4px; display: none; }
+.field .err { color: var(--red-ink); font-size: var(--fs-sm); margin-top: 4px; display: none; }
 .field.invalid input, .field.invalid select { border-color: var(--red); }
 .field.invalid .err { display: block; }
 .form-row { display: flex; gap: 12px; flex-wrap: wrap; }
@@ -736,7 +820,7 @@ body { background: var(--bg-0); }
   background: none; border: none; color: var(--text-3);
   cursor: pointer; font-size: 14px; transition: all var(--t-fast) var(--ease);
 }
-.sub-row .rm:hover { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red-soft); }
+.sub-row .rm:hover { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red-ink); }
 
 /* 文本识别大文本框 */
 .artifact-text {
@@ -756,7 +840,7 @@ body { background: var(--bg-0); }
 .warn {
   background: color-mix(in srgb, var(--yellow) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--yellow) 38%, transparent);
-  color: var(--yellow); padding: 9px 13px; border-radius: var(--r-sm);
+  color: var(--yellow-ink); padding: 9px 13px; border-radius: var(--r-sm);
   font-size: var(--fs-md); margin-bottom: 12px; line-height: 1.6;
 }
 /* 套装字段与实况不一致提示条（详情页）：文案 + 右侧「按实况更新」按钮 */
@@ -768,7 +852,7 @@ body { background: var(--bg-0); }
 .err-box {
   background: color-mix(in srgb, var(--red) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--red) 38%, transparent);
-  color: var(--red-soft); padding: 11px 15px; border-radius: var(--r-sm);
+  color: var(--red-ink); padding: 11px 15px; border-radius: var(--r-sm);
   font-size: var(--fs-md); margin-bottom: 12px; line-height: 1.7;
 }
 .err-box ul { margin: 6px 0 0 18px; }
@@ -780,8 +864,8 @@ body { background: var(--bg-0); }
   font-size: var(--fs-lg); font-weight: 600; line-height: 1.6;
   border: 1px solid transparent;
 }
-.eval-summary.valuable { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); border-color: transparent; }
-.eval-summary.no-value { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red-soft); border-color: transparent; }
+.eval-summary.valuable { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green-ink); border-color: transparent; }
+.eval-summary.no-value { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red-ink); border-color: transparent; }
 .eval-summary.no-case { background: color-mix(in srgb, var(--gray) 16%, transparent); color: var(--text-2); border-color: transparent; }
 
 .eval-case {
@@ -794,8 +878,8 @@ body { background: var(--bg-0); }
 .eval-case table { width: 100%; font-size: var(--fs-md); border-collapse: collapse; }
 .eval-case td { padding: 4px 6px; }
 .eval-case td:first-child { color: var(--text-3); width: 110px; }
-.eval-case .diff-pos { color: var(--green); font-weight: 700; }
-.eval-case .diff-neg { color: var(--red-soft); font-weight: 700; }
+.eval-case .diff-pos { color: var(--green-ink); font-weight: 700; }
+.eval-case .diff-neg { color: var(--red-ink); font-weight: 700; }
 
 /* 情况优先级（三 > 二 > 一）：金色 > 紫色 > 灰蓝，左侧色条 + 同色边框 */
 .eval-case.case-3 { border-left: 3px solid var(--brand); }
@@ -856,7 +940,7 @@ body { background: var(--bg-0); }
   padding: 2px 9px; font-size: var(--fs-md); opacity: 0.6;
   border-radius: var(--r-sm);
 }
-.eval-row .btn-hide:hover { color: var(--red-soft); border-color: color-mix(in srgb, var(--red) 40%, transparent); opacity: 1; }
+.eval-row .btn-hide:hover { color: var(--red-ink); border-color: color-mix(in srgb, var(--red) 40%, transparent); opacity: 1; }
 
 /* 独立评估页结果行：grid 固定列（所有行共享列轨道 → 各列纵向对齐；横向间距 gap 16px 均匀） */
 .eval-row.eval-row-grid {
@@ -912,7 +996,7 @@ body { background: var(--bg-0); }
   margin-top: 8px; background: none; color: var(--text-3);
   border-color: transparent; opacity: 0.7;
 }
-.remodel-card .rm-del:hover { color: var(--red-soft); border-color: color-mix(in srgb, var(--red) 40%, transparent); opacity: 1; }
+.remodel-card .rm-del:hover { color: var(--red-ink); border-color: color-mix(in srgb, var(--red) 40%, transparent); opacity: 1; }
 /* 主行：行动 → 评估对象 ＋ 现状 → 期望（视觉重心，浅底突出） */
 .rm-main {
   display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;
@@ -924,7 +1008,7 @@ body { background: var(--bg-0); }
 .rm-main .rm-role:hover { color: var(--brand-strong); text-decoration: underline; }
 .rm-main .rm-flow { color: var(--text-2); }
 .rm-main .rm-flow b { color: var(--brand-strong); font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
-.rm-main .rm-arrow { font-style: normal; color: var(--text-3); padding: 0 2px; }
+.rm-main .rm-arrow { font-style: normal; color: var(--text-3-hi); padding: 0 2px; }
 /* 操作行：建议指定 + 尘耗/效率 */
 .rm-op {
   display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px;
@@ -978,12 +1062,21 @@ body { background: var(--bg-0); }
 
 /* ============================== 16. 响应式 ============================== */
 @media (max-width: 900px) {
-  .role-card .rc-eff { width: auto; min-width: 0; }
-  .role-card .rc-parts { min-width: 0; }
+  /* 角色卡三段堆叠（2026-10-15 批次 0）：①名字+分数+状态徽章 ②有效词条 ③部位徽章。
+     原单行结构在窄屏下部位徽章会竖排、各卡换行不一致（order 重排 + 整行换行，DOM 不变）。 */
+  .role-card .rc-line { row-gap: 8px; }
+  .role-card .rc-name { order: 1; }
+  .role-card .rc-score { order: 2; }
+  .role-card .rc-badge { order: 3; }                                /* 基类 margin-left:auto → 贴行右 */
+  .role-card .rc-eff { order: 4; flex: 1 1 100%; width: auto; min-width: 0; }
+  .role-card .rc-parts { order: 5; flex: 1 1 100%; min-width: 0; justify-content: flex-start; }
+  .role-card .rc-sep { display: none; }
 }
 
 @media (max-width: 768px) {
   .artifact-grid { grid-template-columns: 1fr; }
+  .search-box { flex: 1 1 100%; }
+  .search-box input { width: auto; flex: 1; }
   .topbar-inner { flex-wrap: wrap; gap: 8px; }
   .modal { max-width: 100%; }
   .score-overview .big { font-size: 40px; }
@@ -994,6 +1087,7 @@ body { background: var(--bg-0); }
 @media (max-width: 480px) {
   .topbar-actions { width: 100%; justify-content: flex-end; }
   .topbar-actions .btn { flex: 1; }
+  .topbar-actions .more-wrap { flex: 1; }
   .slot-pick { grid-template-columns: 1fr; }
   .artifact-card li { grid-template-columns: 1fr 44px 40px auto; }
 }
@@ -1014,7 +1108,8 @@ body { background: var(--bg-0); }
   margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line-1);
 }
 .coll-bucket {
-  background: var(--bg-1); border: 1px solid var(--line-1);
+  /* 2026-10-15 批次 0：去描边（并入全站无边框材质分层；原为唯一带边框卡片） */
+  background: var(--bg-1); border: none;
   border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
 }
 .coll-bucket-title { font-size: var(--fs-lg); color: var(--text-1); font-weight: 600; margin-bottom: 8px; }
@@ -1050,18 +1145,18 @@ body { background: var(--bg-0); }
 }
 .coll-bar > i { display: block; height: 100%; border-radius: 3px; background: var(--brand); }
 /* 极限度百分比 = 重要信息 → 亮色（与「套装」互换配色，2026-10-11） */
-.coll-pct { flex: 0 0 44px; text-align: right; font-family: var(--font-num); font-size: var(--fs-xs); color: var(--text-1); }
+.coll-pct { flex: 0 0 44px; text-align: right; font-family: var(--font-num); font-size: var(--fs-sm); color: var(--text-1); }
 
 /* 持有件：整块右对齐；套装 / 等级 / 4 条副词条各占固定宽度 → 跨行严格上下对齐 */
-.coll-item { display: flex; align-items: baseline; gap: 10px; min-width: 0; width: 100%; justify-content: flex-end; font-size: var(--fs-xs); }
-.coll-set { flex: 0 0 104px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.coll-lv { flex: 0 0 46px; color: var(--text-3); font-family: var(--font-num); }
-.coll-subs { display: flex; gap: 8px; min-width: 0; color: var(--text-3); }
+.coll-item { display: flex; align-items: baseline; gap: 10px; min-width: 0; width: 100%; justify-content: flex-end; font-size: var(--fs-sm); }
+.coll-set { flex: 0 0 104px; color: var(--text-3-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.coll-lv { flex: 0 0 46px; color: var(--text-3-hi); font-family: var(--font-num); }
+.coll-subs { display: flex; gap: 8px; min-width: 0; color: var(--text-3-hi); }
 .coll-subs > * { flex: 0 0 92px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 命中该维度的词条高亮（一眼看出这件靠什么成为极限） */
 .coll-hot { color: var(--brand-strong); font-weight: 600; }
-.coll-cold { color: var(--text-3); }
-.coll-empty { color: var(--text-3); }
+.coll-cold { color: var(--text-3-hi); }
+.coll-empty { color: var(--text-3-hi); }
 
 /* —— 藏品视角面板（评估结果内嵌）：维度 | 藏品值 | 新件值 | 满级最值 | 止损容错 | 极限度合并条
       —— 行 = **flex + space-between**（2026-10-14 六版：用户要求「元素等间隔布置、行末不留空白」）：
@@ -1078,7 +1173,7 @@ body { background: var(--bg-0); }
 .coll-panel .coll-pcts { flex: 0 1 auto; }
 .coll-cur { font-family: var(--font-num); color: var(--text-1); text-align: right; }
 .coll-new { font-family: var(--font-num); text-align: right; }
-.coll-max { font-family: var(--font-num); color: var(--green); text-align: right; }
+.coll-max { font-family: var(--font-num); color: var(--green-ink); text-align: right; }
 /* 止损容错列 = 还可歪 N 次 / 不能歪 / —（灰：已可入藏）
    「不能歪」与「还可歪」**完全同款**（同色同字重，2026-10-14 用户指定）——仅文案不同；.tight 仅作标记类（测试定位用）。
    左内距 14px（弹窗内与值组的呼吸）；13px 小一号（从属但醒目） */
@@ -1088,18 +1183,18 @@ body { background: var(--bg-0); }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 /* ⚠ 容错列各变体均勿用 .warn 类名——与第 14 节全局「提示条」.warn 撞名（会带上 padding/border/背景） */
-.coll-tol.none { color: var(--text-3); font-weight: 400; }
+.coll-tol.none { color: var(--text-3-hi); font-weight: 400; }
 /* 浅色模式：--yellow 在浅底上对比不足 → 深金（按行背景 #e5e5ea 调校）；「—」走变量无需覆盖 */
-[data-appearance="light"] .coll-tol:not(.none) { color: #755d00; }
+[data-appearance="light"] .coll-tol:not(.none) { color: var(--yellow-ink); }   /* 值同原 #755d00，收编为统一 ink 变量 */
 /* 极限度合并条（2026-10-14 五版）：[藏品% 48px][条 基准 320px][满级% 48px] 整体成组；
    条两段绝对定位：.seg-cur = 金（目前）、.seg-pot = 绿（满级预期增量）；left/width 由行内 % 指定。
-   独立页组合 432px（条 320）；弹窗随行收缩至组合 140px（条 28px）。 */
+   独立页组合 432px（条 320）；弹窗随行收缩至组合 172px（条 60px；2026-10-15 复核勘误，原记 140/28 为迭代中间值）。 */
 .coll-pcts { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; }
 .coll-panel .coll-pct {
   flex: 0 0 48px; font-size: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .coll-panel .coll-pct-cur { text-align: right; color: var(--text-1); }
-.coll-panel .coll-pct-max { text-align: left; color: var(--green); }
+.coll-panel .coll-pct-max { text-align: left; color: var(--green-ink); }
 /* 条用 width（而非 flex-basis）表达 320px 基准——flex-basis 不参与组合的固有宽度（intrinsic）计算，
    会被算成「条内容 0 + min-width 12」→ 组合塌缩成 124px（2026-10-14 实测踩坑）。 */
 .coll-panel .coll-pcts .coll-bar { width: 320px; flex: 0 1 auto; min-width: 12px; position: relative; }
@@ -1109,15 +1204,33 @@ body { background: var(--bg-0); }
 .coll-add { margin-top: 10px; }
 
 .coll-nav { display: inline-flex; gap: 6px; margin-left: auto; }
-.coll-nav .btn { padding: 4px 10px; font-size: var(--fs-xs); }
+.coll-nav .btn { padding: 4px 10px; font-size: var(--fs-sm); }
 
+/* 窄屏降级（2026-10-15 批次 3）：不再横向滚动——四列改「首行 = 维度|值|极限度，次行 = 持有件」两行式；
+   桌面端 211px 固定极限度列（配平红线）仅在 ≥1001px 保障，窄屏改弹性。 */
 @media (max-width: 1000px) {
-  .coll-slot { overflow-x: auto; }
-  .coll-bucket { min-width: 700px; }
+  .coll-slot { overflow-x: visible; }
+  .coll-bucket { min-width: 0; }
+  .coll-row {
+    grid-template-columns: 56px 84px minmax(0, 1fr);
+    row-gap: 5px;
+  }
+  .coll-row .coll-dim { grid-column: 1; grid-row: 1; }
+  .coll-row .coll-val { grid-column: 2; grid-row: 1; }
+  .coll-row .coll-ex { grid-column: 3; grid-row: 1; }
+  .coll-row .coll-item { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
+  .coll-set { flex: 0 1 auto; min-width: 0; max-width: 132px; }
+  .coll-item { gap: 8px; }
+  .coll-subs { flex: 1 1 auto; }
+  .coll-subs > * { flex: 1 1 0; }
+  .coll-nav { flex-wrap: wrap; }
 }
 @media (max-width: 768px) {
+  /* 藏品持有件：套装+等级一行、副词条换行占满（2026-10-15 批次 3） */
+  .coll-item { flex-wrap: wrap; row-gap: 3px; }
+  .coll-subs { flex: 1 1 100%; }
   /* 窄屏（flex 行）：允许换行；元素改内容宽；合并条隐藏、仅两数字并排 */
-  .coll-panel .coll-row { flex-wrap: wrap; gap: 3px 10px; font-size: 11px; }
+  .coll-panel .coll-row { flex-wrap: wrap; gap: 3px 10px; font-size: var(--fs-sm); }
   .coll-panel .coll-dim, .coll-panel .coll-cur, .coll-panel .coll-new, .coll-panel .coll-max { flex: 0 0 auto; }
   .coll-panel .coll-tol { flex: 0 0 auto; padding-left: 0; }
   .coll-panel .coll-pcts { flex: 0 0 auto; justify-content: flex-end; gap: 6px; }
@@ -1125,6 +1238,24 @@ body { background: var(--bg-0); }
   .coll-panel .coll-pcts .coll-bar { display: none; }
 }
 
+
+/* ============================== 18. SVG 图标（2026-10-15 批次 2） ============================== */
+/* 精灵库定义在 index.html（<symbol id="i-xxx">，24 viewBox）；线宽 / 颜色由 .ico 统一并继承进 use 影子树。 */
+.svg-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.ico {
+  width: 16px; height: 16px; flex: none; vertical-align: -3px;
+  fill: none; stroke: currentColor; stroke-width: 1.75;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+/* 尺寸变体：小按钮 14 / 空态大图 40 / 空位卡 22 */
+.btn-sm .ico { width: 14px; height: 14px; }
+.empty .icon .ico { width: 40px; height: 40px; }
+.ea-ico { width: 22px; height: 22px; }
+/* 行内文本场景的间距（flex 容器内由 gap 承担） */
+.warn .ico, .eval-summary .ico, .rm-note .ico { margin-right: 7px; }
+.a-slot .ico, .coll-slot-title .ico { margin-right: 6px; }
+/* 空位卡内层（图标 + 部位名） */
+.ea-inner { display: flex; flex-direction: column; align-items: center; gap: 9px; }
 
 /* ============================================================
    外观（2026-10-12）：两种固定搭配，二选一
@@ -1149,7 +1280,8 @@ body { background: var(--bg-0); }
      故改为等价的**不透明**深灰（页面底上 7.75:1 / 4.73:1） */
   --text-1: #000000;
   --text-2: #4b4b52;
-  --text-3: #6b6b74;
+  --text-3: #63636b;             /* 2026-10-15：微深——原值在行底 #e5e5ea 上仅 4.19:1 */
+  --text-3-hi: #63636b;          /* 与 --text-3 同值（浅色两档合一） */
 
   /* 语义色 = Apple 浅色系统色 */
   --green: #34c759;
@@ -1161,6 +1293,22 @@ body { background: var(--bg-0); }
   --gray: #8e8e93;
   --red-soft: #ff3b30;
   --red-soft-hi: #d70015;
+
+  /* 语义色 ink（文字专用加深版，2026-10-15 批次 0）：Apple 原色作小号文字在白 / 淡底上
+     仅 1.5~3.6:1；文字统一加深至 ≥4.5:1（沿用止损容错深金 #755d00 成例） */
+  --green-ink: #156f33;
+  --yellow-ink: #755d00;
+  --red-ink: #c1121f;
+  --orange-ink: #a85400;
+  --purple-ink: #7d2ca8;
+  --blue-ink: #0062cc;
+  --gray-ink: #61616a;
+
+  /* 达成度「金 / 橙」档·浅色：金 = 浓金（勿偏褐）、橙 = 深橙；文字均 ≥4.5:1（brand 是蓝，不能兼任金档） */
+  --grade-gold: #c9971f;
+  --grade-gold-ink: #7d6000;
+  --grade-orange: #e58500;
+  --grade-orange-ink: #96500a;
 
   /* 填充：整体翻转为黑色叠加（否则白底上白色填充不可见） */
   --fill-1: rgba(0, 0, 0, 0.06);
@@ -1183,12 +1331,26 @@ body { background: var(--bg-0); }
   --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.12);
   --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.18);
 
-  /* 强调色 = 浅色 systemBlue（--brand-strong 表示更深的 hover 态） */
+  /* 强调色 = 浅色 systemBlue（--brand-strong 表示更深的 hover 态，兼「淡蓝底上的文字色」：
+     2026-10-15 由 #0062cc 收深至 #005fc4——原值在 17~20% 蓝 tint 底上约 4.4:1，略欠） */
   --brand: #007aff;
-  --brand-strong: #0062cc;
+  --brand-strong: #005fc4;
   --brand-dim: #4da3ff;
   --brand-ink: #ffffff;
 }
+
+/* 主按钮（浅色）：底色加深使白字 ≥4.5:1（#007aff 白字仅 4.02 → #0071e3 = 4.7；hover 再深一档） */
+[data-appearance="light"] .btn-primary { background: #0071e3; }
+[data-appearance="light"] .btn-primary:hover { background: #0068d2; }
+
+/* 品牌色·淡蓝底上的文字（浅色）：--brand 在 17~20% 蓝 tint 上仅 ~3.1:1 → 收深（深色主题不动） */
+[data-appearance="light"] .part.loose,
+[data-appearance="light"] .part.empty.loose,
+[data-appearance="light"] .chip.on,
+[data-appearance="light"] .a-loose-tag,
+[data-appearance="light"] .rm-kind:has(input:checked),
+[data-appearance="light"] .artifact-card.empty-art.loose,
+[data-appearance="light"] .artifact-card.empty-art:hover { color: var(--brand-strong); }
 
 /* ============ 顶栏「外观切换」按钮（2026-10-12）
    纯图标、无文字：深色+金（☾） ⇄ 浅色+蓝（☀）。整套可随 js/appearance.js 一起删除。 ============ */

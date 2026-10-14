@@ -34,7 +34,9 @@
     var light = mode === "light";
     var label = light ? "当前：浅色 + 蓝，点击切换到 深色 + 金"
                       : "当前：深色 + 金，点击切换到 浅色 + 蓝";
-    btn.textContent = light ? "☀" : "☾";
+    btn.innerHTML = light
+      ? '<svg class="ico" aria-hidden="true" focusable="false"><use href="#i-sun"></use></svg>'
+      : '<svg class="ico" aria-hidden="true" focusable="false"><use href="#i-moon"></use></svg>';
     btn.title = label;
     btn.setAttribute("aria-label", label);
     btn.setAttribute("aria-pressed", light ? "true" : "false");
