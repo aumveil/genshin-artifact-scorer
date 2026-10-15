@@ -110,9 +110,9 @@ const path = require("path");
 
   // —— 元素图标断言（场景 3 角色设了 element=冰）——
   {
-    const iconImgs = Array.from(app.querySelectorAll(".role-card .ele-icon")).map(i => i.getAttribute("src"));
-    const hasIce = iconImgs.includes("assets/elements/冰.png");
-    console.log("首页元素图标:", hasIce ? "✓ " + iconImgs.join(", ") : "✗ 未找到（实际: " + iconImgs.join(", ") + "）");
+    const iconCls = Array.from(app.querySelectorAll(".role-card .ele-icon")).map(i => i.className);
+    const hasIce = iconCls.some(x => x.includes("ele-cryo"));
+    console.log("首页元素图标:", hasIce ? "✓ " + iconCls.join(", ") : "✗ 未找到（实际: " + iconCls.join(", ") + "）");
     if (!hasIce) process.exitCode = 1;
   }
 
@@ -149,7 +149,7 @@ const path = require("path");
 
   // —— 筛选验证（两条互斥路径：①按角色=套装 ②按散件=部位+主词条；切换即清空另一路）——
   const tabBtn = key => app.querySelector('.filter-bar .filter-tabs .ftab[data-m="' + key + '"]');
-  const filterSelects = () => app.querySelectorAll(".filter-bar select");
+  const filterSelects = () => app.querySelectorAll(".filter-bar select:not(.sort-select)");   // R6：排序下拉单独计
   const listNames = () => Array.from(app.querySelectorAll(".role-card .rc-name")).map(n => n.textContent);
   // 清除按钮按文本定位（套装面板内有「清空」按钮，避免误匹配）
   const clearBtn = () => Array.from(app.querySelectorAll(".filter-bar .btn")).find(b => b.textContent.includes("清除"));
@@ -158,6 +158,8 @@ const path = require("path");
   console.log("路径①[按角色]默认:", tabBtn("role").classList.contains("active") ? "✓" : "✗",
     "· 件级下拉数:", filterSelects().length, filterSelects().length === 0 ? "✓" : "✗",
     "· 列表数:", listNames().length, listNames().length === 3 ? "✓" : "✗");
+  console.log("排序下拉存在（R6）:", app.querySelector(".filter-bar .sort-select") ? "✓" : "✗");
+  if (!app.querySelector(".filter-bar .sort-select")) process.exitCode = 1;
 
   // ② 按角色：套装多选（读角色套装字段 role.sets，2026-10-09 起不再按已录入件计数）
   //    场景数据：测试-正常 sets=[魔女]；测试-无散件 sets=[魔女]；测试-导入式 sets=[绝缘之旗印]
@@ -339,7 +341,7 @@ const path = require("path");
     console.log("还原三开关后:", cardsRestore.length, cardsRestore.length === 3 ? "✓" : "✗");
     if (cardsRestore.length !== 3) process.exitCode = 1;
     // 录入弹窗：等级默认 20（重塑评估域；切换到手动输入 tab 后可见 #mLevel）
-    const btnNewArt = Array.from(app.querySelectorAll(".filter-bar button")).find(b => b.textContent.includes("录入新圣遗物"));
+    const btnNewArt = Array.from(app.querySelectorAll("button")).find(b => b.textContent.includes("录入新圣遗物"));   // R12：录入钮已移至标题右侧
     btnNewArt.click();
     await new Promise(r => setTimeout(r, 30));
     const tabManual = window.document.querySelector(".mode-tabs .tab[data-m='manual']");
@@ -684,6 +686,7 @@ const path = require("path");
       const btnCfg2 = Array.from(app.querySelectorAll(".detail-head button")).find(b => b.textContent.includes("角色配置"));
       btnCfg2.click();
       await new Promise(r => setTimeout(r, 80));
+      // （R11 移除：权值画像条列断言——功能已整体删除）
       const chip = Array.from(window.document.querySelectorAll("#cChips .chip")).find(c => !c.classList.contains("on"));
       if (!chip) { console.log("配置弹窗取消冒烟: ✗ 未找到未选中的词条 chip"); process.exitCode = 1; }
       else {
@@ -727,6 +730,12 @@ const path = require("path");
     if (buckets.length !== 26) process.exitCode = 1;
     console.log("藏品页维度行总数（应 95）:", dimRows.length, dimRows.length === 95 ? "✓" : "✗");
     if (dimRows.length !== 95) process.exitCode = 1;
+
+    // 藏品版图矩阵（R3）：95 位实格 + 61 空格位（26 桶 × 6 维 − 95）
+    const cmCells = app.querySelectorAll(".coll-matrix .cm-cell[data-bucket]");
+    const cmVoid = app.querySelectorAll(".coll-matrix .cm-cell.void");
+    console.log("藏品版图矩阵（95 位 + 61 空格）:", cmCells.length, cmVoid.length, cmCells.length === 95 && cmVoid.length === 61 ? "✓" : "✗");
+    if (cmCells.length !== 95 || cmVoid.length !== 61) process.exitCode = 1;
 
     // 火伤杯 · 双爆：持有值 = 2×11.7 + 21.8 = 45.2；极限度 = 45.2 / 54.6 = 82.8%
     const critRow = Array.from(app.querySelectorAll('.coll-row[data-bucket="goblet#火元素伤害加成"]'))

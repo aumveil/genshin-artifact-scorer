@@ -71,6 +71,7 @@ js/
   data.js                  数据校验（圣遗物 / 角色字段规则与警示，对应实现方案 §2.8）
   parser.js                圣遗物文本解析（含自定义套装识别）
   core.js                  四大核心算法实现（词条计算 / 角色评分 / 价值评估 / 重塑评估）
+  charts.js                图形语言（圆环构成图 / 藏品热力矩阵）
   adapters.js              数据适配层
   store.js                 状态管理
   storage.js               localStorage 持久化与 migrate
@@ -78,10 +79,10 @@ js/
   ui.js                    界面渲染与交互
   feedback.js              弹窗 / 通知等反馈组件
   main.js                  入口
-assets/elements/           元素图标
+assets/elements/           元素图标（深色原样；light/ = 浅色变体）
 test.js                    算法回归测试
 test-dom.js                jsdom 页面冒烟测试
-docs/                      设计与开发文档（背景知识 / 算法设计 / 实现方案 / UI 优化说明）
+docs/                      设计与开发文档（背景知识 / 算法设计 / 实现方案）
 backups/                   网页导出的数据 JSON 备份（随仓库版本化保存）
 ```
 

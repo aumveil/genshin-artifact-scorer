@@ -111,15 +111,33 @@
     }
     return toastWrap;
   }
-  function toast(msg, type, duration) {
+  function toast(msg, type, duration, action) {
     const t = el("div", "toast toast-" + (type || "info"));
-    t.textContent = msg;
+    if (type === "success") {
+      // 保存成功微反馈（R4）：对勾 200ms 弹入（克制版）
+      t.innerHTML = '<svg class="ico toast-ico" aria-hidden="true" focusable="false"><use href="#i-check"></use></svg>';
+      const span = el("span", "toast-msg");
+      span.textContent = msg;
+      t.appendChild(span);
+    } else {
+      t.textContent = msg;
+    }
+    // 操作钮（R5 撤销窗口）：点击执行后立即收起
+    if (action && action.label && typeof action.fn === "function") {
+      const btn = el("button", "toast-act", action.label);
+      btn.addEventListener("click", () => {
+        t.remove();
+        try { action.fn(); } catch (e) { /* 动作内部自会提示，静默 */ }
+      });
+      t.appendChild(btn);
+    }
     ensureToastWrap().appendChild(t);
     requestAnimationFrame(() => t.classList.add("show"));
+    const dur = action ? (duration || 6000) : (duration || 2600);
     setTimeout(() => {
       t.classList.remove("show");
       setTimeout(() => t.remove(), 260);
-    }, duration || 2600);
+    }, dur);
     return t;
   }
 

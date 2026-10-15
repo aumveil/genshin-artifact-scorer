@@ -80,6 +80,30 @@
     return { words: total, adjustedWords: adjustedTotal, perfect: perfectTotal, percent, tags };
   }
 
+  // ============ R2：分数构成（按词条分组的加权贡献，与 calcArtifactScore 同口径） ============
+  /** 分数构成：返回 [{stat, label, value, pct}] 按贡献降序；不含无效 / 待激活词条 */
+  function scoreComposition(role) {
+    if (!role) return [];
+    const eff = role.effectiveStats || [];
+    const w = role.weights || {};
+    const acc = {};
+    let total = 0;
+    C.SLOT_KEYS.forEach(slot => {
+      const S = role.artifacts && role.artifacts[slot];
+      if (!S) return;
+      (S.substats || []).forEach(s => {
+        if (s.activated === false) return;
+        if (!eff.includes(s.stat) || !C.UMAX[s.stat]) return;
+        const v = (s.value / C.UMAX[s.stat]) * (w[s.stat] || 0);
+        acc[s.stat] = (acc[s.stat] || 0) + v;
+        total += v;
+      });
+    });
+    return Object.keys(acc)
+      .map(stat => ({ stat, label: C.MAIN_SHORT[stat] || stat, value: acc[stat], pct: total > 0 ? (acc[stat] / total) * 100 : 0 }))
+      .sort((a, b) => b.value - a.value);
+  }
+
   // ============ 算法三：圣遗物价值评估（含强化潜力）============
   /** 剩余未解锁强化次数：max(0, 5 − floor(level/4)) */
   function remaining(level) {
@@ -687,7 +711,7 @@
   }
 
   global.App.core = {
-    calcArtifactScore, calcPerfect, calcEnergyPenalty, calcCharacterScore,
+    calcArtifactScore, calcPerfect, calcEnergyPenalty, calcCharacterScore, scoreComposition,
     maxW, remaining, ERContrib, evaluateAgainst, evaluateArtifact, freeSlots,
     expectedHits, calcRemodel, remodelSignature, inferInitialCount, collectRemodelCandidates, wearsSet, remodelTargets, analyzeRemodel,
     // 角色套装字段（2026-10-09）

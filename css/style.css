@@ -66,12 +66,17 @@
   --grade-orange: #d97706;
   --grade-orange-ink: #e08614;
 
+  /* 构成圆环分类色（R2 起；R9 改 6 色相可辨版——原单色阶相邻难分，用户反馈） */
+  --comp-1: #e8c46a; --comp-2: #d98e5f; --comp-3: #7fb5b0;
+  --comp-4: #8a9fc0; --comp-5: #a99bc9; --comp-6: #b08a4a;
+
   /* 字体：Apple 字体栈（Mac 落到 SF Pro / 苹方，Windows 落到 Segoe UI / 雅黑） */
   --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text",
              "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  /* 数字·次轨专用：rolls（当量 ×N.NN）等「技术读数」小字；主轨读数已改系统字体 + tabular-nums（2026-10-15 R0） */
   --font-num: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
 
-  /* 字号梯度（Apple 的 Title2 = 22px；大数字 48px；2026-10-15 批次 1：12px 下限——原 --fs-xs 11px 并入 --fs-sm） */
+  /* 字号梯度（Apple 的 Title2 = 22px；大数字 56px；2026-10-15 批次 1：12px 下限——原 --fs-xs 11px 并入 --fs-sm；同日 R0：hero 48→56） */
   --fs-sm: 12px;
   --fs-md: 13px;
   --fs-base: 14px;
@@ -79,7 +84,7 @@
   --fs-xl: 17px;
   --fs-2xl: 22px;
   --fs-3xl: 28px;
-  --fs-hero: 48px;
+  --fs-hero: 56px;
 
   /* 间距（4px 基准） */
   --sp-1: 4px;
@@ -127,6 +132,7 @@
   --t-fast: 160ms;
   --t-md: 280ms;
   --t-slow: 420ms;
+  --t-data: 600ms;           /* 数据图形生长 / 数字滚动（R4） */
 }
 
 /* ============================== 2. 基础 ============================== */
@@ -159,10 +165,12 @@ body { background: var(--bg-0); }
 
 .hidden { display: none !important; }
 
-/* 数字使用等宽变体，避免评分/词条数跳动 */
-.rc-score, .rc-eff b i, .a-score, .a-pct, .rolls, .big,
+/* 数字等宽变体（防评分/词条数跳动）。.num = 统一工具类，新代码一律用它；
+   以下为兼容清单（勿删）。2026-10-15 R0：主轨数字去 mono、改系统字体，tabular 语义不变 */
+.num, .rc-score, .rc-eff b i, .a-score, .a-pct, .rolls, .big,
 .ov-item .val, .eval-row .row-diff, .eval-row .row-pot,
-.artifact-card li .val, .artifact-card li .rolls {
+.artifact-card li .val, .artifact-card li .rolls,
+.coll-val, .coll-pct, .coll-cur, .coll-new, .coll-max {
   font-variant-numeric: tabular-nums;
 }
 
@@ -344,6 +352,9 @@ body { background: var(--bg-0); }
 }
 .filter-bar select:hover { background: var(--bg-3-hover); }
 .filter-bar select:focus-visible { outline: none; box-shadow: var(--glow-gold); }
+/* 「清除」安静变体（R10）：与同排控件 32px 等高、透明底——三级动作视觉降级，不再与下拉/按钮冲突 */
+.filter-bar .btn-clear { height: 32px; padding: 0 10px; background: transparent; color: var(--text-3); }
+.filter-bar .btn-clear:hover { background: var(--fill-2); color: var(--text-1); }
 
 /* 套装筛选：下拉多选面板（checkbox 列表；判定读角色套装字段 role.sets） */
 .set-filter { position: relative; }
@@ -432,12 +443,30 @@ body { background: var(--bg-0); }
   color: var(--text-1); letter-spacing: -0.01em;
 }
 
-/* 元素图标（角色名左侧；首页卡片 16px / 详情页标题 24px） */
+/* 元素图标（角色名左侧；首页卡片 16px / 详情页标题 24px）
+   2026-10-15 R1：img → span + background-image（双主题变体随 data-appearance 纯 CSS 切换）。
+   深色主题 = 官方素材原样（128px 采样校准：火 #ee7a38 水 #4cc2f1 风 #75c2a8 雷 #b190c2 草 #a7c73b 冰 #9fd6e3 岩 #fab634）；
+   浅色主题 = 加深变体（保色相按比例暗化，对比 ≥3.6:1，文件在 assets/elements/light/）。 */
 .ele-icon {
   display: inline-block; width: 16px; height: 16px;
-  border-radius: 3px; object-fit: contain;
+  border-radius: 3px;
   vertical-align: -2px; margin-right: 5px;
+  background-repeat: no-repeat; background-position: center; background-size: contain;
 }
+.ele-icon.ele-pyro    { background-image: url("../assets/elements/火.png"); }
+.ele-icon.ele-hydro   { background-image: url("../assets/elements/水.png"); }
+.ele-icon.ele-anemo   { background-image: url("../assets/elements/风.png"); }
+.ele-icon.ele-electro { background-image: url("../assets/elements/雷.png"); }
+.ele-icon.ele-dendro  { background-image: url("../assets/elements/草.png"); }
+.ele-icon.ele-cryo    { background-image: url("../assets/elements/冰.png"); }
+.ele-icon.ele-geo     { background-image: url("../assets/elements/岩.png"); }
+[data-appearance="light"] .ele-icon.ele-pyro    { background-image: url("../assets/elements/light/火.png"); }
+[data-appearance="light"] .ele-icon.ele-hydro   { background-image: url("../assets/elements/light/水.png"); }
+[data-appearance="light"] .ele-icon.ele-anemo   { background-image: url("../assets/elements/light/风.png"); }
+[data-appearance="light"] .ele-icon.ele-electro { background-image: url("../assets/elements/light/雷.png"); }
+[data-appearance="light"] .ele-icon.ele-dendro  { background-image: url("../assets/elements/light/草.png"); }
+[data-appearance="light"] .ele-icon.ele-cryo    { background-image: url("../assets/elements/light/冰.png"); }
+[data-appearance="light"] .ele-icon.ele-geo     { background-image: url("../assets/elements/light/岩.png"); }
 .detail-title .ele-icon {
   width: 24px; height: 24px; border-radius: 4px;
   align-self: center; margin-right: 6px;
@@ -476,7 +505,7 @@ body { background: var(--bg-0); }
   display: flex; align-items: center; justify-content: center; gap: 5px;
   flex-wrap: wrap; flex: 1; min-width: 320px;
 }
-/* 部位徽章：统一中性底，按部位着色（散件再叠金色） */
+/* 部位徽章：统一中性底，仅散件部位金色强调（不做按部位着色） */
 .role-card .part {
   width: 88px; text-align: center;
   font-size: 12px; padding: 3px 6px; border-radius: var(--r-sm);
@@ -528,8 +557,8 @@ body { background: var(--bg-0); }
   letter-spacing: -0.03em;
 }
 .score-overview .big em {
-  font-size: 14px; font-style: normal; color: var(--text-3);
-  margin-left: 6px; font-weight: 400;
+  font-size: 20px; font-style: normal; color: var(--text-3);
+  margin-left: 6px; font-weight: 500;
   -webkit-text-fill-color: var(--text-3);
 }
 .ov-main { flex: 1; min-width: 340px; display: flex; flex-direction: column; gap: 12px; }
@@ -545,10 +574,11 @@ body { background: var(--bg-0); }
   transition: width 0.6s var(--ease);
 }
 /* 信息小块：横向均匀分布（space-between；2026-10-14 用户要求「词条数、完美基准等条目均匀分配下位置」，
-   块间 gap 40px 为最小间隔，剩余空间由 space-between 均分 → 首块贴左、末块贴右） */
+   块间 gap 为最小间隔，剩余空间由 space-between 均分 → 首块贴左、末块贴右。
+   R9：最小列距 40→28 + 圆环收至 72px——为保「充能」块单行（芙宁娜实测差 9px 换行，用户反馈） */
 .score-overview .ov-stats {
   flex: 1; min-width: 320px; display: flex; flex-wrap: wrap;
-  gap: 14px 40px; align-items: flex-start; justify-content: space-between;
+  gap: 14px 28px; align-items: flex-start; justify-content: space-between;
 }
 .score-overview .ov-item { display: flex; flex-direction: column; gap: 3px; }
 .score-overview .ov-item .lbl { font-size: var(--fs-sm); color: var(--text-3); letter-spacing: 0.5px; }
@@ -568,6 +598,133 @@ body { background: var(--bg-0); }
   font-style: normal; color: var(--brand-strong); margin-left: 2px; font-weight: 700;
 }
 .score-overview .eff-none { color: var(--text-3); font-style: italic; }
+
+/* ============ 图表语言（R2，2026-10-15）：计量条 / 构成条 ============ */
+/* （R8 移除：.meter 计量条体系与 5 部位 mini 条——按用户反馈删除） */
+
+/* 构成图例（R8 起供 hero 圆环共用；不靠颜色单独载义：图例带数值） */
+.comp-legend { display: flex; flex-wrap: wrap; gap: 3px 14px; margin-top: 6px; font-size: var(--fs-sm); color: var(--text-3); }
+.cl-item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.cl-item > i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+
+/* （R11 移除：权值画像条列样式——用户反馈不需要，功能整体删除） */
+
+/* —— 藏品版图矩阵（R3：藏品页顶部总览）—— */
+:root { --cm-cell: 14px; --cm-gap: 3px; --cm-head: 17px; }
+.coll-matrix { background: var(--bg-1); border-radius: var(--r-lg); padding: 14px 16px 12px; }
+.cm-title { font-size: var(--fs-sm); color: var(--text-3); margin-bottom: 10px; }
+.cm-body { display: flex; gap: 10px; align-items: flex-start; justify-content: center; overflow-x: auto; }
+.cm-labels { display: grid; grid-auto-rows: var(--cm-cell); gap: var(--cm-gap); flex: none; padding-top: calc(var(--cm-head) + var(--cm-gap)); }   /* R13：让出列头行，与格阵对齐 */
+.cm-group-head { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; font-size: var(--fs-sm); color: var(--text-3); line-height: 1; }
+.cm-labels span { font-size: var(--fs-sm); color: var(--text-3); display: flex; align-items: center; line-height: 1; white-space: nowrap; }
+.cm-strip { display: flex; gap: 10px; }
+.cm-group { display: grid; grid-template-rows: var(--cm-head); grid-auto-rows: var(--cm-cell); gap: var(--cm-gap); }
+.cm-cell { width: var(--cm-cell); height: var(--cm-cell); border-radius: 3px; display: block; }
+.cm-cell.empty { border: 1px solid var(--line-1); }
+.cm-cell.void { background: var(--fill-4); opacity: 0.55; }
+.cm-cell[data-bucket] { cursor: pointer; }
+.cm-cell[data-bucket]:hover { outline: 2px solid var(--brand); outline-offset: 1px; }
+@media (max-width: 768px) {
+  :root { --cm-cell: 10px; --cm-gap: 2px; }
+  .cm-strip { gap: 6px; }
+  .cm-body { gap: 8px; }
+  .cm-labels { display: none; }   /* 窄屏：行标签让位（title 悬停仍有全称） */
+}
+
+/* ============ 动效（R4，2026-10-16）：数据生长 / 列表进入 / 反馈 ============ */
+/* 圆环构成图（R8）：挂载淡入（reduced-motion 由全局归零规则直落） */
+@keyframes ring-in { from { opacity: 0; } }
+.ov-ring svg { animation: ring-in var(--t-data) var(--ease); }
+/* 列表进入：前 10 张卡 stagger 240ms + 20ms×i（仅「切入列表视图」挂 .card-in；同视图重渲染不动画） */
+@keyframes card-in { from { opacity: 0; transform: translateY(4px); } }
+.role-list .card-in { animation: card-in 240ms var(--ease) both; animation-delay: calc(var(--i, 0) * 20ms); }
+/* 列表刷新过渡：同视图结果更新柔和淡入（连打输入 250ms 内不重播，保输入手感） */
+@keyframes list-refresh { from { opacity: 0.35; } }
+.role-list.list-refresh { animation: list-refresh 150ms var(--ease); }
+/* 保存成功微反馈：toast 对勾 200ms 弹入（克制版，无彩带） */
+@keyframes toast-pop { from { transform: scale(0.6); opacity: 0; } }
+.toast-ico { color: var(--green-ink); flex: none; animation: toast-pop 200ms var(--ease) both; }
+
+/* ============ R5（2026-10-16）：指令面板 / Toast 操作钮 / 移动端底部 Tab ============ */
+/* 指令面板（⌘K）：毛玻璃淡入 200ms + 输入即过滤（无逐字动画） */
+.palette-root { position: fixed; inset: 0; z-index: 400; }
+.palette-scrim { position: absolute; inset: 0; background: var(--scrim); }
+@keyframes palette-in { from { opacity: 0; transform: translateY(-4px); } }
+.palette {
+  position: relative; margin: 12vh auto 0; width: min(560px, calc(100vw - 32px));
+  background: var(--glass-2);
+  backdrop-filter: saturate(180%) blur(24px);
+  -webkit-backdrop-filter: saturate(180%) blur(24px);
+  border: 1px solid var(--line-1); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  animation: palette-in 200ms var(--ease);
+  overflow: hidden;
+}
+.palette-input {
+  width: 100%; padding: 14px 16px; border: none; outline: none; background: transparent;
+  color: var(--text-1); font-family: inherit; font-size: var(--fs-xl);
+  border-bottom: 1px solid var(--line-1);
+}
+.palette-list { max-height: min(52vh, 460px); overflow-y: auto; padding: 6px; }
+.pk-group { padding: 8px 10px 4px; font-size: var(--fs-sm); color: var(--text-3); }
+.pk-item {
+  display: flex; align-items: center; gap: 8px; justify-content: space-between;
+  padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: var(--fs-base); color: var(--text-1);
+}
+.pk-item.on { background: var(--fill-1); }
+.pk-item .pk-label { display: inline-flex; align-items: center; min-width: 0; }
+.pk-item .pk-hint { font-size: var(--fs-sm); color: var(--text-3); flex: none; }
+.pk-empty { padding: 14px; text-align: center; color: var(--text-3); font-size: var(--fs-md); }
+/* Toast 操作钮（撤销窗口，R5） */
+.toast-act {
+  background: none; border: none; padding: 0 2px; cursor: pointer;
+  color: var(--brand-strong); font-family: inherit; font-size: var(--fs-md); font-weight: 600;
+}
+.toast-act:hover { text-decoration: underline; }
+/* 移动端底部 Tab（≤768 显示；桌面隐藏）+ ⋯ 菜单移动端项 */
+.tabbar { display: none; }
+.more-item.mobile-only { display: none; }
+@media (max-width: 768px) {
+  .tabbar {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
+    background: var(--glass-1);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-top: 1px solid var(--line-1);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tabbar .tab {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 7px 0 5px; background: none; border: none; cursor: pointer;
+    color: var(--text-3); font-family: inherit; font-size: var(--fs-sm);
+  }
+  .tabbar .tab .ico { width: 20px; height: 20px; }
+  .tabbar .tab.on { color: var(--brand); font-weight: 600; }
+  .more-item.mobile-only { display: flex; }
+  /* 顶栏瘦身（R5）：视图入口入底部 Tab、新建角色收于 ⋯ 菜单 */
+  #btnEvaluate, #btnRemodel, #btnCollection, #btnNewRole { display: none; }
+  .app { padding-bottom: 96px; }   /* 让位底部 Tab（含安全区） */
+}
+
+/* ============ R6（2026-10-16）：备份提醒条 ============ */
+.backup-note {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; margin-bottom: 12px; border-radius: var(--r-md);
+  background: var(--fill-4); color: var(--text-2); font-size: var(--fs-sm);
+}
+.backup-note .bn-text { flex: 1; min-width: 0; }
+.backup-note .bn-later { color: var(--text-3); }
+
+/* ============ R7（2026-10-16）保留：新纪录徽章（R8 已删帮助气泡与藏品进度条）============ */
+.badge-record { background: color-mix(in srgb, var(--grade-gold) 16%, transparent); color: var(--grade-gold-ink); margin-left: 8px; }
+
+/* ============ R8（2026-10-16）：hero 圆环构成图（置于卡片最右侧） ============ */
+.ov-ring { display: flex; align-items: center; gap: 10px; flex: none; align-self: center; padding-left: 4px; }
+.ov-ring svg { width: 72px; height: 72px; display: block; flex: none; }
+.ov-ring-legend { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ov-ring-legend .cl-item { font-size: var(--fs-sm); color: var(--text-3); display: flex; align-items: center; gap: 5px; }
+.ov-ring-legend .cl-name { flex: 1; }
+.ov-ring-legend .cl-pct { font-style: normal; color: var(--text-2); font-variant-numeric: tabular-nums; text-align: right; }
 
 /* ============================== 11. 圣遗物卡片 ============================== */
 .artifact-grid {
@@ -621,7 +778,6 @@ body { background: var(--bg-0); }
 .artifact-card .a-set { font-size: var(--fs-sm); color: var(--text-3); }
 .artifact-card .a-level {
   font-size: var(--fs-sm); color: var(--text-3);
-  font-family: var(--font-num); letter-spacing: 0.3px;
 }
 .artifact-card .a-main {
   font-size: 17px; font-weight: 700; margin: 6px 0 8px;
@@ -654,9 +810,9 @@ body { background: var(--bg-0); }
 }
 .artifact-card .a-score {
   font-size: 15px; font-weight: 700; color: var(--brand-strong);
-  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums;
 }
-.artifact-card .a-pct { font-size: 15px; font-weight: 700; font-family: var(--font-num); }
+.artifact-card .a-pct { font-size: 15px; font-weight: 700; }
 
 /* 部位达成度边框分级（2026-10-15 批次 4，决策 4A）：>80 金 / 70~80 橙 / 60~70 紫 / 50~60 蓝 / <50 灰
    —— 红专用于警示（充能不足 / 删除 / 负向差）、绿专用于有效（词条 / 达标 / 正向差），全站色义不再翻转。 */
@@ -741,6 +897,8 @@ body { background: var(--bg-0); }
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   border: none; border-left: 3px solid var(--line-2);
   color: var(--text-1); font-size: var(--fs-md); line-height: 1.5;
+  display: flex; align-items: center; gap: 8px;   /* R4：成功对勾图标与文案对齐 */
+  pointer-events: auto;   /* R8 修正：.toast-wrap 是 none，导致「撤销 / 评估」按钮真实鼠标点不动 */
   box-shadow: var(--shadow-md);
   opacity: 0; transform: translateX(24px);
   transition: opacity var(--t-md) var(--ease), transform var(--t-md) var(--ease);
@@ -753,9 +911,6 @@ body { background: var(--bg-0); }
 .toast-info { border-left-color: var(--blue); }
 
 /* 编辑部位选择 */
-.slot-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.slot-pick .btn { padding: 13px 10px; font-size: var(--fs-base); justify-content: flex-start; }
-.slot-pick .btn.slot-empty { color: var(--text-3); background: transparent; box-shadow: inset 0 0 0 1px var(--line-1); justify-content: center; }
 
 /* ============================== 13. 表单 ============================== */
 .field { margin-bottom: 14px; }
@@ -857,6 +1012,8 @@ body { background: var(--bg-0); }
 }
 .err-box ul { margin: 6px 0 0 18px; }
 .info { color: var(--text-3); font-size: var(--fs-md); line-height: 1.7; }
+/* 页面级说明（R12）：与下方内容留呼吸（评估 / 重塑 / 藏品三页头部说明，用户反馈「离卡片太近」） */
+.info.page-info { margin-bottom: 18px; }
 
 /* ============================== 15. 价值评估 ============================== */
 .eval-summary {
@@ -1085,10 +1242,7 @@ body { background: var(--bg-0); }
 }
 
 @media (max-width: 480px) {
-  .topbar-actions { width: 100%; justify-content: flex-end; }
-  .topbar-actions .btn { flex: 1; }
-  .topbar-actions .more-wrap { flex: 1; }
-  .slot-pick { grid-template-columns: 1fr; }
+  .topbar-actions { justify-content: flex-end; }   /* R5：顶栏瘦身后原「整行均分」规则移除 */
   .artifact-card li { grid-template-columns: 1fr 44px 40px auto; }
 }
 
@@ -1133,8 +1287,8 @@ body { background: var(--bg-0); }
 
 .coll-dim { color: var(--text-2); white-space: nowrap; }
 .coll-val {
-  font-family: var(--font-num); font-size: var(--fs-lg); font-weight: 600;
-  color: var(--brand-strong); text-align: right; letter-spacing: 0.02em; white-space: nowrap;
+  font-size: var(--fs-lg); font-weight: 600;
+  color: var(--brand-strong); text-align: right; white-space: nowrap;
 }
 .coll-row.empty .coll-val { font-size: var(--fs-sm); font-weight: 400; color: var(--text-3); }
 
@@ -1145,12 +1299,12 @@ body { background: var(--bg-0); }
 }
 .coll-bar > i { display: block; height: 100%; border-radius: 3px; background: var(--brand); }
 /* 极限度百分比 = 重要信息 → 亮色（与「套装」互换配色，2026-10-11） */
-.coll-pct { flex: 0 0 44px; text-align: right; font-family: var(--font-num); font-size: var(--fs-sm); color: var(--text-1); }
+.coll-pct { flex: 0 0 44px; text-align: right; font-size: var(--fs-sm); color: var(--text-1); }
 
 /* 持有件：整块右对齐；套装 / 等级 / 4 条副词条各占固定宽度 → 跨行严格上下对齐 */
 .coll-item { display: flex; align-items: baseline; gap: 10px; min-width: 0; width: 100%; justify-content: flex-end; font-size: var(--fs-sm); }
 .coll-set { flex: 0 0 104px; color: var(--text-3-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.coll-lv { flex: 0 0 46px; color: var(--text-3-hi); font-family: var(--font-num); }
+.coll-lv { flex: 0 0 46px; color: var(--text-3-hi); }
 .coll-subs { display: flex; gap: 8px; min-width: 0; color: var(--text-3-hi); }
 .coll-subs > * { flex: 0 0 92px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 命中该维度的词条高亮（一眼看出这件靠什么成为极限） */
@@ -1171,9 +1325,9 @@ body { background: var(--bg-0); }
 .coll-panel .coll-cur, .coll-panel .coll-new, .coll-panel .coll-max { flex: 0 0 74px; }
 .coll-panel .coll-tol { flex: 0 0 90px; }
 .coll-panel .coll-pcts { flex: 0 1 auto; }
-.coll-cur { font-family: var(--font-num); color: var(--text-1); text-align: right; }
-.coll-new { font-family: var(--font-num); text-align: right; }
-.coll-max { font-family: var(--font-num); color: var(--green-ink); text-align: right; }
+.coll-cur { color: var(--text-1); text-align: right; }
+.coll-new { text-align: right; }
+.coll-max { color: var(--green-ink); text-align: right; }
 /* 止损容错列 = 还可歪 N 次 / 不能歪 / —（灰：已可入藏）
    「不能歪」与「还可歪」**完全同款**（同色同字重，2026-10-14 用户指定）——仅文案不同；.tight 仅作标记类（测试定位用）。
    左内距 14px（弹窗内与值组的呼吸）；13px 小一号（从属但醒目） */
@@ -1203,8 +1357,6 @@ body { background: var(--bg-0); }
 .coll-panel .coll-pcts .seg-pot { background: var(--green); }
 .coll-add { margin-top: 10px; }
 
-.coll-nav { display: inline-flex; gap: 6px; margin-left: auto; }
-.coll-nav .btn { padding: 4px 10px; font-size: var(--fs-sm); }
 
 /* 窄屏降级（2026-10-15 批次 3）：不再横向滚动——四列改「首行 = 维度|值|极限度，次行 = 持有件」两行式；
    桌面端 211px 固定极限度列（配平红线）仅在 ≥1001px 保障，窄屏改弹性。 */
@@ -1223,7 +1375,6 @@ body { background: var(--bg-0); }
   .coll-item { gap: 8px; }
   .coll-subs { flex: 1 1 auto; }
   .coll-subs > * { flex: 1 1 0; }
-  .coll-nav { flex-wrap: wrap; }
 }
 @media (max-width: 768px) {
   /* 藏品持有件：套装+等级一行、副词条换行占满（2026-10-15 批次 3） */
@@ -1309,6 +1460,10 @@ body { background: var(--bg-0); }
   --grade-gold-ink: #7d6000;
   --grade-orange: #e58500;
   --grade-orange-ink: #96500a;
+
+  /* 构成圆环分类色·浅色（深一档，保证白底可辨） */
+  --comp-1: #8a6d1f; --comp-2: #b05f2e; --comp-3: #2f7a74;
+  --comp-4: #4e6a9e; --comp-5: #6a5a96; --comp-6: #8a6420;
 
   /* 填充：整体翻转为黑色叠加（否则白底上白色填充不可见） */
   --fill-1: rgba(0, 0, 0, 0.06);

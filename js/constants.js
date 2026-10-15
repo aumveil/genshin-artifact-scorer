@@ -184,6 +184,9 @@
   };
   const ELEMENT_KEYS = Object.keys(ELEMENTS);
 
+  // 元素 → 英文 slug（R1 图标 span + class；浅色变体文件位于 assets/elements/light/，2026-10-15）
+  const ELEMENT_SLUG = { "火": "pyro", "水": "hydro", "风": "anemo", "雷": "electro", "草": "dendro", "冰": "cryo", "岩": "geo" };
+
   // 角色名 → 元素 默认映射（依据《角色有效属性与权值参考.md》66 角色 + 用户现有角色中新增的 11 位；
   // 新建/渲染时自动带出，仍可在角色配置中修改。2026-10-09 补齐 11 条，现有 77 个角色 100% 覆盖）
   const CHARACTER_ELEMENT_HINTS = {
@@ -308,7 +311,7 @@
   global.App.constants = {
     SLOTS, SLOT_KEYS, UMAX, STAT_TYPE, SUB_STATS, MAIN_STATS_BY_SLOT,
     SLOT_ALIASES, STAT_ALIASES, SETS, SET_ALIASES, ROLL_TIERS, DISPLAY_HALF, MAIN_SHORT,
-    ELEMENTS, ELEMENT_KEYS, CHARACTER_ELEMENT_HINTS,
+    ELEMENTS, ELEMENT_KEYS, ELEMENT_SLUG, CHARACTER_ELEMENT_HINTS,
     MAX_LEVEL, MAX_ROLLS_PER_STAT, MIN_DIFF, MAX_WEIGHT, STORAGE_VERSION,
     ROLL_AVG, DUST_COST, REMODEL_K,
     COLLECTION_DIMS, COLLECTION_DIM_KEYS, COLLECTION_DIM_BY_KEY,

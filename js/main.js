@@ -7,6 +7,10 @@
   function init() {
     global.App.ui.setupIO();
     global.App.ui.render();
+    // 数据迁移提示（R6）：本次加载发生过格式升级改写 → 诚实告知（一次性）
+    if (global.App.storage.wasMigrated && global.App.storage.wasMigrated()) {
+      global.App.feedback.toast("数据已升级至新版格式", "info");
+    }
 
     // 浏览器控制台调试接口
     global.App.debug = {

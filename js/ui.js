@@ -10,6 +10,7 @@
   const core = global.App.core;
   const data = global.App.data;
   const feedback = global.App.feedback;   // 反馈层：toast / confirm / prompt / info
+  const charts = global.App.charts;       // 图形语言（R2）：计量条 / 构成条
 
   let view = { type: "list" };            // {type:'list'} | {type:'detail', roleId} | {type:'evaluate'} | {type:'remodel'}
   let lastViewType = null;                // 上一次渲染的视图类型（批次 5：视图切换方向感动效用；null = 尚未渲染过）
@@ -26,6 +27,10 @@
   let setPanelOutsideHandler = null;      // 套装下拉「点击面板外关闭」的全局监听（复用同一 handler，避免重复渲染累积）
   let pendingArtifact = null;             // 新圣遗物临时对象（评估用）
   let evalHidden = new Set();             // 评估会话内被手动移除的有提升角色 id（重新录入/放弃时清空）
+  let listEnterAnim = false;              // 列表进入 stagger（R4）：仅视图切入列表时挂类，同视图重渲染不动画
+  let lastRefreshAt = 0;                  // 列表刷新淡入防抖时间戳（R4：连打输入 250ms 内不重播）
+  let heroRollState = { roleId: null, value: 0 };   // hero 数字滚动基线（R4：换角色从 0 起滚、同角色从旧值）
+  const collRecordBuckets = new Set();   // 新纪录（R7）：本会话刷新过纪录的桶（入藏时标记；会话内存，刷新即清）
 
   // —— 重塑分析（算法四）会话内状态（零数据模型改动，均不落盘）——
   let remodelK = C.REMODEL_K.basic;       // 当前保底档位（主排序默认基础档 k=2）
@@ -66,7 +71,7 @@
   function elementIconHtml(role, extraCls) {
     const ele = (role && (role.element || C.CHARACTER_ELEMENT_HINTS[role.name])) || "";
     if (!ele || !C.ELEMENTS[ele]) return "";
-    return `<img class="ele-icon${extraCls ? " " + extraCls : ""}" src="assets/elements/${C.ELEMENTS[ele]}" alt="${ele}" title="${ele}">`;
+    return `<span class="ele-icon ele-${C.ELEMENT_SLUG[ele]}${extraCls ? " " + extraCls : ""}" role="img" aria-label="${ele}" title="${ele}"></span>`;
   }
 
   // 角色是否配置充能：有效词条含「元素充能效率」。不含充能时——充能需求/面板充能不适用（配置禁用），
@@ -90,10 +95,27 @@
     if (curType === "detail" && lastViewType !== "detail") dirCls = "v-fwd";
     else if (lastViewType === "detail" && curType === "list") dirCls = "v-back";
     else if (lastViewType !== null && curType !== lastViewType) dirCls = "v-lat";
+    listEnterAnim = (curType === "list" && lastViewType !== "list");   // R4：列表进入 stagger 仅「切入列表」时播
     lastViewType = curType;
     app.classList.remove("v-fwd", "v-back", "v-lat");
     if (dirCls) app.classList.add(dirCls);
-    if (view.type === "detail") { app.appendChild(renderDetail(store.getRole(view.roleId))); return; }
+
+    // 底部 Tab（R5）：按当前视图同步高亮（详情归「首页」）
+    const tabbarEl = document.getElementById("tabbar");
+    if (tabbarEl) {
+      const tabKey = curType === "detail" ? "list" : curType;
+      tabbarEl.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.view === tabKey));
+    }
+
+    // hash 路由（R6）：视图 → 地址栏（赋值即历史记录项，浏览器后退 = 视图后退；自写触发由监听端等价判定拦截）
+    const wantHash = viewToHash();
+    if ((location.hash || "#/") !== wantHash) location.hash = wantHash;
+    if (view.type === "detail") {
+      const rDetail = store.getRole(view.roleId);
+      if (rDetail) pushRecent(rDetail.name);   // ⌘K 最近访问（R7）
+      app.appendChild(renderDetail(rDetail));
+      return;
+    }
     if (view.type === "evaluate") {
       app.appendChild(renderEvaluateView());
       return;
@@ -269,7 +291,7 @@
     });
 
     const condBox = el("div", "filter-cond");
-    const btnClear = el("button", "btn btn-sm", ico("close") + "清除");
+    const btnClear = el("button", "btn btn-sm btn-clear", ico("close") + "清除");   // R10：安静变体（32px 等高、透明底）
 
     if (f.mode === "role") {
       // —— ① 按角色：套装多选（下拉 checkbox 面板；判定读角色套装字段 role.sets，不数件数）——
@@ -352,10 +374,25 @@
 
     btnClear.addEventListener("click", () => {
       // 清除当前路径的条件与搜索（保留所在路径），刷新后保持无条件
-      listFilter = { mode: listFilter.mode, slot: "", mainStat: "", sets: [], q: "" };
+      listFilter = { mode: listFilter.mode, slot: "", mainStat: "", sets: [], q: "", sort: listFilter.sort };
       persistFilter();
       render();
     });
+    // 排序（R6）：分数降序 / 按名字 / 按元素——随筛选一并持久化；清除筛选不清排序
+    const sortSel = el("select", "sort-select");
+    sortSel.title = "排序方式";
+    sortSel.setAttribute("aria-label", "排序方式");
+    sortSel.innerHTML =
+      `<option value="score" ${f.sort === "score" ? "selected" : ""}>分数降序</option>` +
+      `<option value="name" ${f.sort === "name" ? "selected" : ""}>按名字</option>` +
+      `<option value="element" ${f.sort === "element" ? "selected" : ""}>按元素</option>`;
+    sortSel.addEventListener("change", e => {
+      listFilter.sort = e.target.value;
+      persistFilter();
+      render();
+    });
+    // 注意：btnClear 此刻尚未挂入 DOM（过滤栏由下方 fBar.append 统一组装）——排序下拉在组装行插入
+
     // 搜索框（2026-10-15 批次 3）：按角色名过滤，与双路径筛选 AND 叠加；贴行右（margin-left:auto）
     const searchBox = el("div", "search-box");
     searchBox.innerHTML = ico("search") +
@@ -366,19 +403,41 @@
       persistFilter();
       updateResults();   // 局部刷新：不重建输入框，保持焦点
     });
-    fBar.append(tabs, condBox, btnClear, searchBox);
+    fBar.append(tabs, condBox, btnClear, sortSel, searchBox);
     wrap.appendChild(fBar);
 
     // —— 结果区（信息 + 列表/空态），套装勾选时局部刷新 ——
     const infoEl = el("div", "filter-info");
+    // 备份提醒（R6）：距上次导出 ≥14 天且有变更（或从未导出）→ 低调提示条，可延后 7 天
+    const br = global.App.io.backupReminderDue(store.getStore());
+    if (br) {
+      const note = el("div", "backup-note");
+      note.appendChild(el("span", "bn-text",
+        br.never ? "还没有导出过数据备份——数据目前只存在本机浏览器里。" : `数据已 ${br.days} 天未备份（上次导出后又有改动）。`));
+      const btnGo = el("button", "btn btn-sm", ico("export") + "立即导出");
+      btnGo.addEventListener("click", () => { $("#btnExport").click(); render(); });
+      const btnLater = el("button", "btn btn-sm bn-later", "稍后");
+      btnLater.addEventListener("click", () => { global.App.io.snoozeBackupReminder(); note.remove(); });
+      note.append(btnGo, btnLater);
+      wrap.appendChild(note);
+    }
     wrap.appendChild(infoEl);
     const listWrap = el("div");
     wrap.appendChild(listWrap);
 
     function updateResults() {
       const filtered = computeFiltered();
-      const sorted = [...filtered].sort((a, b) =>
-        core.calcCharacterScore(b).percent - core.calcCharacterScore(a).percent);
+      // 排序（R6）：分数降序（默认）/ 按名字（zh 拼音）/ 按元素（元素序内分数降序）
+      const byScore = (a, b) => core.calcCharacterScore(b).percent - core.calcCharacterScore(a).percent;
+      const eleOrd = r => {
+        const ele = r.element || C.CHARACTER_ELEMENT_HINTS[r.name] || "";
+        const i = C.ELEMENT_KEYS.indexOf(ele);
+        return i < 0 ? 99 : i;
+      };
+      const sorted = [...filtered].sort(
+        f.sort === "name" ? (a, b) => a.name.localeCompare(b.name, "zh")
+          : f.sort === "element" ? (a, b) => (eleOrd(a) - eleOrd(b)) || byScore(a, b)
+            : byScore);
       if (isActive()) {
         const qq = (f.q || "").trim();
         const segs = [];
@@ -386,7 +445,8 @@
         else { if (f.slot) segs.push(`散件·${C.SLOTS[f.slot].name}`); if (f.mainStat) segs.push(f.mainStat); }
         if (qq) segs.push(`搜索「${qq}」`);
         infoEl.textContent = `筛选 ${filtered.length}/${roles.length} 个角色` +
-          (segs.length ? ` · ${segs.join(" · ")}` : "") + `，按分数降序`;
+          (segs.length ? ` · ${segs.join(" · ")}` : "") +
+          (f.sort === "name" ? "，按名字排序" : f.sort === "element" ? "，按元素排序" : "，按分数降序");
         infoEl.style.display = "";
       } else {
         infoEl.style.display = "none";
@@ -399,7 +459,7 @@
           '<div class="empty-desc">试试调整筛选条件，或清除筛选查看全部角色。</div>');
         const btnC = el("button", "btn", ico("close") + "清除筛选");
         btnC.addEventListener("click", () => {
-          listFilter = { mode: listFilter.mode, slot: "", mainStat: "", sets: [], q: "" };
+          listFilter = { mode: listFilter.mode, slot: "", mainStat: "", sets: [], q: "", sort: listFilter.sort };
           persistFilter();   // 清除同样落盘，刷新后保持无条件
           render();
         });
@@ -407,12 +467,47 @@
         listWrap.appendChild(empty);
       } else {
         const list = el("div", "role-list");
+        const animateIn = listEnterAnim;   // 视图切入列表才 stagger（R4）；同视图重渲染不动画
+        listEnterAnim = false;
         sorted.forEach(role => list.appendChild(buildRoleCard(role)));
+        // 刷新过渡（R4）：同视图结果更新柔和淡入（连打输入 250ms 内不重播，保手感）
+        const now = Date.now();
+        if (!animateIn && now - lastRefreshAt > 250) { lastRefreshAt = now; list.classList.add("list-refresh"); }
         listWrap.appendChild(list);
+        // 列表进入 stagger（R4）：挂载后按「首屏可见」测量挂类（≤14，屏外不播）——
+        // 固定张数在长首屏下会留「空洞」（2026-10-16 实拍修正）
+        if (animateIn) {
+          const vh = window.innerHeight || 900;
+          let k = 0;
+          for (const c of list.children) {
+            if (k >= 14 || c.getBoundingClientRect().top > vh) break;
+            c.classList.add("card-in");
+            c.style.setProperty("--i", k);
+            k++;
+          }
+        }
       }
     }
     updateResults();
     return wrap;
+  }
+
+  // 数字滚动（R4）：rAF 内插 500ms ease-out；reduced-motion / 微小差值直落终值
+  function rollNumber(node, from, to) {
+    if (!node) return;
+    let reduce = false;
+    try { reduce = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (e) { /* 无 matchMedia 环境（如 jsdom） */ }
+    if (reduce || Math.abs(to - from) < 0.05) { node.textContent = to.toFixed(1); return; }
+    node.textContent = from.toFixed(1);   // 先落基线，再滚动（避免首帧闪现终值）
+    const dur = 500;
+    const t0 = performance.now();
+    const tick = () => {
+      const t = Math.min(1, (performance.now() - t0) / dur);
+      const eased = 1 - Math.pow(1 - t, 3);
+      node.textContent = (from + (to - from) * eased).toFixed(1);
+      if (t < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   }
 
   // ============ 视图 2：角色详情 ============
@@ -431,14 +526,13 @@
     const grpDanger = el("div", "btn-group");
     const btnBack = el("button", "btn", ico("back") + "返回");   // 2026-10-15 用户反馈：幽灵样式与同排按钮不和谐 → 统一为次按钮
     const btnEditCfg = el("button", "btn", ico("config") + "角色配置");
-    const btnEdit = el("button", "btn", ico("edit") + "编辑");
     const btnNew = el("button", "btn", ico("plus") + "录入新圣遗物");   // 2026-10-15 用户反馈：与同排按钮统一（去主按钮金色）
+    // （R10 删除「编辑」按钮：与部位卡点击编辑完全重复，用户反馈多余）
     const btnDelRole = el("button", "btn btn-danger", ico("trash") + "删除");
     btnBack.title = "返回角色列表";
     btnDelRole.title = "删除该角色（不可恢复）";
     btnBack.addEventListener("click", () => { view = { type: "list" }; render(); });
     btnEditCfg.addEventListener("click", () => openRoleConfigModal(role));
-    btnEdit.addEventListener("click", () => openEditSlotModal(role));
     btnNew.addEventListener("click", () => openArtifactModal(role, null, "new"));
     btnDelRole.addEventListener("click", () => {
       feedback.confirm({
@@ -457,7 +551,7 @@
       });
     });
     grpNav.append(btnBack);
-    grpMain.append(btnEditCfg, btnEdit, btnNew);
+    grpMain.append(btnEditCfg, btnNew);
     grpDanger.append(btnDelRole);
     actions.append(grpNav, grpMain, grpDanger);
     head.append(title, actions);
@@ -483,8 +577,12 @@
     const setsHtml = cSets.length
       ? cSets.map(s => `<b>${esc(s)}</b>`).join("")
       : '<span class="eff-none">其他 / 不判套装</span>';
+    // 分数构成圆环（R8，取代原构成条与 5 部位 mini 条）：置于 hero 卡片最右侧
+    const compItems = core.scoreComposition(role).filter(x => x.value > 0);
+    const ringHtml = compItems.length
+      ? `<div class="ov-ring" role="group" aria-label="分数构成">${charts.donut(compItems)}</div>` : "";
     ov.innerHTML =
-      `<div class="big">${score.percent.toFixed(1)}<em>分</em></div>` +
+      `<div class="big"><span class="big-num">${score.percent.toFixed(1)}</span><em>分</em></div>` +
       `<div class="ov-main">` +
       `<div class="ov-progress" role="progressbar" aria-valuenow="${pctClamped.toFixed(1)}" aria-valuemin="0" aria-valuemax="100" aria-label="角色评分达成度">` +
       `<i style="width:${pctClamped.toFixed(1)}%"></i></div>` +
@@ -498,8 +596,14 @@
       `<div class="ov-item"><span class="lbl">套装</span>` +
       `<span class="val ov-eff" data-role-sets>${setsHtml}</span></div>` +
       erBlock +
-      `</div></div>`;
+      `</div></div>` +
+      ringHtml;
     wrap.appendChild(ov);
+
+    // 数字滚动（R4）：换角色从 0 起滚、同角色重渲染从旧值滚（reduced-motion 直落）
+    const rollFrom = heroRollState.roleId === role.id ? heroRollState.value : 0;
+    heroRollState = { roleId: role.id, value: score.percent };
+    rollNumber(ov.querySelector(".big-num"), rollFrom, score.percent);
 
     // 套装字段 vs 圣遗物实况不一致 → 黄字警告 + 一键「按实况更新」（策略 b：字段为准，不自动同步）
     // 仅在「5 部位录全 且 字段非空」时检查（未录全＝当这个角色不存在；留空＝「其他」，无可比对）
@@ -531,6 +635,11 @@
     return wrap;
   }
 
+  /** 达成度五档取级（R2 统一入口；阈值延续批次 4 决策 4A） */
+  function gradeCls(pct) {
+    return pct > 80 ? "score-gold" : pct > 70 ? "score-orange" : pct > 60 ? "score-purple" : pct > 50 ? "score-blue" : "score-gray";
+  }
+
   function renderArtifactCard(role, slot, art) {
     const isLoose = role.looseSlot === slot;   // 散件部位：金色「散」角标视觉引导（不文字说明）
     if (!art) {
@@ -546,7 +655,7 @@
     const perfect = core.calcPerfect(slot, role);
     const pct = perfect > 0 ? (sScore / perfect) * 100 : 0;
     // 达成度五档（2026-10-15 批次 4，决策 4A）：金 > 橙 > 紫 > 蓝 > 灰——红还给警示、绿还给有效
-    const rankCls = pct > 80 ? "score-gold" : pct > 70 ? "score-orange" : pct > 60 ? "score-purple" : pct > 50 ? "score-blue" : "score-gray";
+    const rankCls = gradeCls(pct);
     card.classList.add(rankCls);
 
     let subsHtml = "";
@@ -577,28 +686,6 @@
     makeActivatable(card, () => openArtifactModal(role, slot, "edit"), `编辑 ${C.SLOTS[slot].name}`);
 
     return card;
-  }
-
-  /** 编辑部位选择弹窗（详情页右上角「编辑」入口：选择要编辑哪个部位） */
-  function openEditSlotModal(role) {
-    const body = el("div");
-    const grid = el("div", "slot-pick");
-    C.SLOT_KEYS.forEach(slot => {
-      const art = role.artifacts[slot];
-      const btn = el("button", "btn" + (art ? "" : " slot-empty"),
-        `${ico("slot-" + slot)}${C.SLOTS[slot].name}${art ? ` · ${esc(C.MAIN_SHORT[art.mainStat] || art.mainStat)}` : "（未录）"}`);
-      btn.addEventListener("click", () => {
-        closeModal();
-        openArtifactModal(role, slot, "edit");
-      });
-      grid.appendChild(btn);
-    });
-    body.appendChild(grid);
-    const foot = el("div");
-    const btnCancel = el("button", "btn", "取消");
-    btnCancel.addEventListener("click", closeModal);
-    foot.appendChild(btnCancel);
-    openModal("选择要编辑的部位", body, foot);
   }
 
   // ============ 弹窗基础（委托反馈层：动画 / Esc 关闭 / 遮罩关闭 / 焦点管理）============
@@ -930,13 +1017,15 @@
       if (isColl) {
         // 藏品件：写入藏品库（store 内自动清理「被完全取代」的旧件）
         if (isCollEdit && prefill && prefill.id) artifact.id = prefill.id;
+        const rec = collRecordWon(artifact);   // 新纪录（R7）：入藏前判定刷新了哪些位
         const r = isCollEdit ? store.updateCollectionItem(artifact) : store.addCollectionItem(artifact);
         const removed = ((r && r.removed) || []).length;
         closeModal();
         if (view.type !== "collection") view = { type: "collection" };
         render();
         feedback.toast((isCollEdit ? "已更新藏品" : "已存入藏品库") +
-          (removed ? `；${removed} 件旧藏品被完全取代，已移除` : ""), "success");
+          (removed ? `；${removed} 件旧藏品被完全取代，已移除` : "") +
+          (rec ? `；刷新 ${rec.n} 项纪录` : ""), "success");
       } else if (isRemodel) {
         // 重塑分析新件：仅满级（算法四评估域）→ 会话内临时列表（不落盘）
         if (artifact.level < C.MAX_LEVEL) {
@@ -1092,12 +1181,38 @@
   /** 执行替换：写入角色该部位（store 内按副词条充能差联动更新 currentER）；情况三时散件部位置空
    *  @returns {Object|false} store.replaceArtifact 的结果（含 erFrom/erTo/erDelta） */
   function applyReplace(role, art, isSetSwap) {
+    const slot = art.slot;
+    // 撤销窗口（R5）：替换前快照（旧件 / 面板充能 / 散件位），随结果返回给 toast
+    const oldArt = role.artifacts[slot] ? JSON.parse(JSON.stringify(role.artifacts[slot])) : null;
+    const oldER = role.currentER;
+    const oldLooseSlot = role.looseSlot;
     const res = store.replaceArtifact(role.id, art.slot, art);
     if (isSetSwap) {
       role.looseSlot = null;   // 替换后无散件（5 件全套装）
       store.updateRole(role);
     }
+    if (res && res.ok) {
+      res.undo = { slot, oldArt, oldER, oldLooseSlot, newId: role.artifacts[slot] ? role.artifacts[slot].id : null };
+    }
     return res;
+  }
+
+  /** 撤销替换（R5）：恢复旧件 / 面板充能 / 散件位；该部位已被后续修改覆盖时不动并提示 */
+  function undoReplace(roleId, u) {
+    const role = store.getRole(roleId);
+    if (!role || !u) return;
+    const cur = role.artifacts[u.slot];
+    if (!cur || (u.newId && cur.id !== u.newId)) {
+      feedback.toast("该替换已被后续修改覆盖，无法撤销", "warn");
+      return;
+    }
+    if (u.oldArt) role.artifacts[u.slot] = u.oldArt;
+    else delete role.artifacts[u.slot];
+    role.looseSlot = u.oldLooseSlot;
+    role.currentER = u.oldER;
+    store.updateRole(role);
+    render();
+    feedback.toast("已撤销替换", "success");
   }
 
   /** 充能提示文案片段（未联动/无变化时返回空串），如「面板充能 180% → 172.9%」 */
@@ -1142,7 +1257,7 @@
           closeModal();
           render();
           const note = erLinkNote(linkRes);
-          if (note) feedback.toast(`已替换，「${role.name}」${note}`, "success");
+          feedback.toast(`已替换，「${role.name}」` + (note || ""), "success", 6000, { label: "撤销", fn: () => undoReplace(role.id, linkRes.undo) });
         };
         if (setSwap) {
           feedback.confirm({
@@ -1183,22 +1298,17 @@
       return wrap;
     }
 
-    // 头部：标题 + 说明
+    // 头部：标题 + 说明；录入入口统一置于标题最右（R12）
     const head = el("div", "detail-head");
     head.appendChild(el("div", "detail-title", "圣遗物价值评估"));
+    const btnEvalNew = el("button", "btn btn-primary", ico("plus") + "录入新圣遗物");
+    btnEvalNew.title = "录入要评估的新圣遗物";
+    btnEvalNew.addEventListener("click", () => openArtifactModal(roles[0], null, "new"));
+    head.appendChild(btnEvalNew);
     wrap.appendChild(head);
-    wrap.appendChild(el("div", "info", "录入一件新圣遗物后，将自动对全部角色评估，按使用方式优先级列出所有「有提升」的情况。"));
+    wrap.appendChild(el("div", "info page-info", "录入一件新圣遗物后，将自动对全部角色评估，按使用方式优先级列出所有「有提升」的情况。"));
 
-    if (!pendingArtifact) {
-      // 无待评估新圣遗物：提示 + 录入入口
-      const box = el("div", "eval-case");
-      box.innerHTML = `<div class="c-head"><span class="c-title">录入要评估的新圣遗物</span></div>`;
-      const btn = el("button", "btn btn-primary", ico("plus") + "录入新圣遗物");
-      btn.addEventListener("click", () => openArtifactModal(roles[0], null, "new"));
-      box.appendChild(btn);
-      wrap.appendChild(box);
-      return wrap;
-    }
+    if (!pendingArtifact) return wrap;   // 空态：仅标题 + 说明 + 右上角录入入口（R13 删除引导卡）
 
     // —— 评估全部角色 ——
     const art = pendingArtifact;
@@ -1290,7 +1400,7 @@
               pendingArtifact = null;
               evalHidden.clear();
               const note = erLinkNote(linkRes);
-              feedback.toast(`已替换到「${role.name}」的${slotName}` + (note ? `（${note}）` : ""), "success");
+              feedback.toast(`已替换到「${role.name}」的${slotName}` + (note ? `（${note}）` : ""), "success", 6000, { label: "撤销", fn: () => undoReplace(role.id, linkRes.undo) });
               render();
             };
             if (r.isSetSwap) {
@@ -1454,7 +1564,14 @@
     const roles = store.getRoles();
     const head = el("div", "detail-head");
     head.appendChild(el("div", "detail-title", "圣遗物重塑分析"));
+    const btnRmNew = el("button", "btn btn-primary", ico("plus") + "录入新圣遗物");   // R12：统一置于标题最右
+    btnRmNew.title = "录入满级新圣遗物加入本次分析（会话内有效，不写入角色）";
+    btnRmNew.addEventListener("click", () => openArtifactModal(null, null, "remodel"));
+    head.appendChild(btnRmNew);
     wrap.appendChild(head);
+    // 说明置于标题下（R13：与评估/藏品两页一致）
+    wrap.appendChild(el("div", "info page-info",
+      "RV = 重塑后期望分 − 功能位现状分，> 0 表示值得花尘尝试（期望 ≠ 保证，结果可预览）。三情况开关任意组合，关闭的类型不参与评估；散件不评自身，新录入件按游离件评估。"));
 
     if (roles.length === 0) {
       const empty = el("div", "empty",
@@ -1479,9 +1596,6 @@
       `<option value="4">谕告（保底 4 次）</option>`;
     kSel.value = String(remodelK);
     kSel.addEventListener("change", e => { remodelK = parseInt(e.target.value, 10) || 2; render(); });
-    const btnNew = el("button", "btn btn-primary", ico("plus") + "录入新圣遗物");
-    btnNew.title = "录入满级新圣遗物加入本次分析（会话内有效，不写入角色）";
-    btnNew.addEventListener("click", () => openArtifactModal(null, null, "remodel"));
     // 三情况开关：关闭的类型不参与评估，每件在开启范围内重新取 RV 最优行动（会话内状态，不落盘）
     const kindLbl = el("span", "filter-lbl", "情况");
     const kindToggles = REMODEL_KINDS.map(kd => {
@@ -1502,10 +1616,8 @@
     showAllLbl.querySelector("input").addEventListener("change", e => {
       remodelShowAll = e.target.checked; render();
     });
-    ctrl.append(lblK, kSel, btnNew, kindLbl, ...kindToggles, showAllLbl);
+    ctrl.append(lblK, kSel, kindLbl, ...kindToggles, showAllLbl);
     wrap.appendChild(ctrl);
-    wrap.appendChild(el("div", "info",
-      "RV = 重塑后期望分 − 功能位现状分，> 0 表示值得花尘尝试（期望 ≠ 保证，结果可预览）。三情况开关任意组合，关闭的类型不参与评估；散件不评自身，新录入件按游离件评估。"));
 
     // 候选 = 会话内新录入件（优先）+ 藏品件 + 全角色已穿戴满级件（按签名去重）
     // 藏品件按「游离件」（sourceRole = null）参与：只能作为套装件转移给宿主（情况三 promote），
@@ -1685,13 +1797,15 @@
     if (hit) {
       const btn = el("button", "btn btn-primary btn-sm coll-add", "存入藏品库");
       btn.addEventListener("click", () => {
+        const rec = collRecordWon(art);   // 新纪录（R7）：入藏前判定刷新了哪些位
         const r = store.addCollectionItem(art);
         const removed = ((r && r.removed) || []).length;
         pendingArtifact = null;
         closeModal();
         if (view.type === "evaluate") render();
         else { view = { type: "collection" }; render(); }
-        feedback.toast("已存入藏品库" + (removed ? `；${removed} 件旧藏品被完全取代，已移除` : ""), "success");
+        feedback.toast("已存入藏品库" + (removed ? `；${removed} 件旧藏品被完全取代，已移除` : "") +
+          (rec ? `；刷新 ${rec.n} 项纪录` : ""), "success");
       });
       box.appendChild(btn);
     }
@@ -1701,31 +1815,55 @@
   /** 藏品页：按部位 → 桶 → 维度，展示每位「当前持有件」与极限程度（严格四列对齐） */
   function renderCollectionView() {
     const wrap = el("div");
+    const collection = store.getCollection();
+    const { holders } = core.collectionIndex(collection);
     const head = el("div", "detail-head");
     head.appendChild(el("div", "detail-title", "圣遗物藏品"));
+    const btnCollNew = el("button", "btn btn-primary", ico("plus") + "录入藏品");   // R12：统一置于标题最右
+    btnCollNew.addEventListener("click", () => openArtifactModal(null, null, "collection"));
+    head.appendChild(btnCollNew);
     wrap.appendChild(head);
-    wrap.appendChild(el("div", "info",
+    // （R8 移除：藏品进度读数条——按用户反馈删除）
+    wrap.appendChild(el("div", "info page-info",
       "藏品库保存未装备给任何角色的圣遗物：按「部位 + 主词条」分桶，每个桶内按 6 个维度各收藏一件最大值。" +
       "藏品件不参与角色评分，但会参与价值评估的「藏品视角」与重塑分析。"));
 
-    const ctrl = el("div", "filter-bar");
-    const btnNew = el("button", "btn btn-primary", ico("plus") + "录入藏品");
-    btnNew.addEventListener("click", () => openArtifactModal(null, null, "collection"));
-    // 部位快速跳转（26 桶铺开来很长，靠它直达到部位）
-    const nav = el("div", "coll-nav");
-    C.SLOT_KEYS.forEach(k => {
-      const b = el("button", "btn btn-sm", C.SLOTS[k].name);
-      b.addEventListener("click", () => {
-        const target = document.querySelector(`.coll-slot[data-slot="${k}"]`);
+    // （R13 移除：部位跳转按钮组——矩阵已带部位列头，且矩阵格子可点击跳转对应桶）
+
+    // （collection / holders 已在上方计算，进度条与矩阵共用）
+
+    // 藏品版图矩阵（R3）：26 桶 × 95 位总览——色深 = 极限度、描边 = 未收藏；点击跳转对应桶
+    const mWrap = el("div", "coll-matrix");
+    {
+      let totalPos = 0;
+      C.COLLECTION_BUCKETS.forEach(b => { totalPos += C.collectionBucketDims(b).length; });
+      const groups = C.SLOT_KEYS.map(slot => ({
+        label: C.SLOTS[slot].short,   // 列头（R13）：花/羽/沙/杯/头，与左侧维度行构成二维表
+        cols: C.COLLECTION_BUCKETS.filter(b => b.slot === slot).map(b => {
+          const dims = C.collectionBucketDims(b);
+          return C.COLLECTION_DIMS.map(dim => {
+            if (!dims.includes(dim.key)) return null;   // 该桶无此维度（void 格）
+            const h = holders.get(b.key + "|" + dim.key) || null;
+            const full = C.collectionFull(dim.key, b.mainStat);
+            const pct = h ? Math.min(100, h.value / full * 100) : 0;
+            return {
+              key: b.key, hold: !!h, fill: pct,
+              tip: `${b.name} · ${dim.label}：` + (h ? `${collVal(h.value, dim.unit)}（极限度 ${pct.toFixed(1)}%）` : "未收藏") + " · 点击跳转"
+            };
+          });
+        })
+      })).filter(g => g.cols.length);
+      mWrap.innerHTML = `<div class="cm-title">藏品版图 · ${C.COLLECTION_BUCKETS.length} 桶 / ${totalPos} 位（色深 = 极限度；描边 = 未收藏，点击跳转）</div>` +
+        `<div class="cm-body">${charts.heatGrid(C.COLLECTION_DIMS.map(d => d.label), groups)}</div>`;
+      mWrap.addEventListener("click", e => {
+        const cell = e.target.closest(".cm-cell[data-bucket]");
+        if (!cell) return;
+        const row = document.querySelector(`.coll-row[data-bucket="${cell.dataset.bucket}"]`);
+        const target = row && (row.closest(".coll-bucket") || row);
         if (target) { target.scrollIntoView({ block: "start" }); window.scrollBy(0, -72); }
       });
-      nav.appendChild(b);
-    });
-    ctrl.append(btnNew, nav);
-    wrap.appendChild(ctrl);
-
-    const collection = store.getCollection();
-    const { holders } = core.collectionIndex(collection);
+      wrap.appendChild(mWrap);
+    }
 
     C.SLOT_KEYS.forEach(slot => {
       const buckets = C.COLLECTION_BUCKETS.filter(b => b.slot === slot);
@@ -1737,7 +1875,9 @@
       buckets.forEach(b => {
         const dims = C.collectionBucketDims(b);
         const card = el("div", "coll-bucket");
-        card.appendChild(el("div", "coll-bucket-title", esc(b.name)));
+        const bTitle = el("div", "coll-bucket-title", esc(b.name));
+        if (collRecordBuckets.has(b.key)) bTitle.appendChild(el("span", "badge badge-record", "新纪录"));
+        card.appendChild(bTitle);
         const rows = el("div", "coll-rows");
         dims.forEach(dimKey => {
           const dim = C.COLLECTION_DIM_BY_KEY[dimKey];
@@ -1864,9 +2004,11 @@
         // 初始化默认权值 1（未设置时写入，避免保存时缺失）
         if (typeof role.weights[st] !== "number" || !isFinite(role.weights[st])) role.weights[st] = 1;
         const f = el("div", "field", `<label>${esc(st)} 权值</label>` +
-          `<input type="number" step="0.1" min="0.1" max="${C.MAX_WEIGHT}" value="${role.weights[st]}" data-stat="${esc(st)}">`);
+          `<input type="number" step="0.1" min="0" max="1" value="${role.weights[st]}" data-stat="${esc(st)}">`);
         f.querySelector("input").addEventListener("input", e => {
-          role.weights[st] = parseFloat(e.target.value);
+          // R8：权值限 0~1（值模型即时夹取；校验域 0<w≤2 未动——定稿口径不变）
+          const v = parseFloat(e.target.value);
+          role.weights[st] = isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
         });
         wBox.appendChild(f);
       });
@@ -1897,7 +2039,10 @@
       // 从表单统一收集权值（即使未触发 input 事件也生效）
       wBox.querySelectorAll("input").forEach(inp => {
         const st = inp.dataset.stat;
-        if (st) role.weights[st] = parseFloat(inp.value);
+        if (st) {
+          const v = parseFloat(inp.value);
+          role.weights[st] = isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;   // R8：保存时同样夹取 0~1
+        }
       });
       const r = data.validateRoleConfig(role);
       if (r.hard.length > 0) {
@@ -1923,6 +2068,229 @@
   }
 
   // ============ 导入 / 导出 ============
+  /** 圣遗物文本特征检测（R5 粘贴即评估）：等级行 / 词条名+数值 / 部位名，≥2 项命中才算 */
+  function detectArtifactText(text) {
+    if (!text || text.length < 8) return false;
+    const hasLevel = /\+\d{1,2}(?!\d)/.test(text);
+    const hasStat = /(暴击率|暴击伤害|攻击力|生命值|防御力|元素精通|元素充能效率)[^\d%]{0,6}\d/.test(text);
+    const hasSlot = /(生之花|死之羽|时之沙|空之杯|理之冠)/.test(text);
+    return [hasLevel, hasStat, hasSlot].filter(Boolean).length >= 2;
+  }
+
+  /** 粘贴文本 → 圣遗物对象（R8）：解析 + 硬校验全过才返回；否则 null（转录入框修正） */
+  function parsePastedArtifact(text) {
+    let parsed;
+    try { parsed = global.App.parser.parseArtifactText(text); } catch (e) { return null; }
+    const art = parsed && parsed.result;
+    if (!parsed || parsed.ok !== true || !art || !art.slot || !Array.isArray(art.substats)) return null;
+    art.id = store.genId();
+    // validateArtifact 返回错误数组（含 level: "hard"），并非 {hard, soft}
+    const errors = data.validateArtifact(art);
+    if (errors && errors.some(e => e.level === "hard")) return null;
+    return art;
+  }
+
+  /** 进入价值评估并打开录入（R5：⌘K / 粘贴共用；R8：autoRecognize = 打开后自动点「识别」并预填） */
+  function startAssessFlow(prefillText, autoRecognize) {
+    view = { type: "evaluate", evalRoleId: store.getCurrentRole() ? store.getCurrentRole().id : null };
+    render();
+    openArtifactModal(store.getRoles()[0], null, "new");
+    if (prefillText) {
+      const ta = document.querySelector(".artifact-text");
+      if (ta) ta.value = prefillText;
+    }
+    if (autoRecognize) {
+      const b = [...document.querySelectorAll("button")].find(x => x.textContent.trim() === "识别");
+      if (b) b.click();
+    }
+  }
+
+  // ============ 指令面板（⌘K 快速跳转，R5）============
+  let paletteRoot = null, paletteInput = null, paletteList = null, paletteItems = [], paletteIdx = 0, palettePrevFocus = null;
+
+  /** 条目 = 操作 + 视图 + 角色（含元素图标）；输入实时过滤 */
+  function paletteEntries() {
+    const ops = [
+      { group: "操作", label: "新建角色", hint: "创建并配置新角色", fn: () => createRoleFlow() },
+      { group: "操作", label: "录入新圣遗物", hint: "进入价值评估并打开录入", fn: () => startAssessFlow() },
+      { group: "操作", label: "导入数据", hint: "备份或外部数据", fn: () => $("#btnImport").click() },
+      { group: "操作", label: "导出备份", hint: "下载完整数据备份", fn: () => $("#btnExport").click() },
+      { group: "操作", label: "切换外观", hint: "深+金 ⇄ 浅+蓝", fn: () => $("#appearanceToggle").click() }
+    ];
+    const views = [
+      { group: "视图", label: "角色列表", hint: "全部角色", fn: () => { view = { type: "list" }; render(); } },
+      { group: "视图", label: "价值评估", hint: "对新件做全角色评估", fn: () => { view = { type: "evaluate", evalRoleId: store.getCurrentRole() ? store.getCurrentRole().id : null }; render(); } },
+      { group: "视图", label: "重塑分析", hint: "判断满级件重塑价值", fn: () => { view = { type: "remodel" }; render(); } },
+      { group: "视图", label: "藏品库", hint: "95 位收藏版图", fn: () => { view = { type: "collection" }; render(); } }
+    ];
+    // 最近访问优先（R7）：LRU 序在前，其余保持原顺序
+    const recents = loadRecents();
+    const recentIdx = name => { const i = recents.indexOf(name); return i < 0 ? 999 : i; };
+    const roles = store.getRoles().slice()
+      .sort((a, b) => recentIdx(a.name) - recentIdx(b.name))
+      .map(r => ({
+        group: "角色", label: r.name, hint: "",
+        ele: r.element || C.CHARACTER_ELEMENT_HINTS[r.name] || "",
+        fn: () => { view = { type: "detail", roleId: r.id }; render(); }
+      }));
+    const q = (paletteInput.value || "").trim().toLowerCase();
+    let out = ops.concat(views, roles);
+    if (q) out = out.filter(x => x.label.toLowerCase().includes(q) || (x.hint || "").toLowerCase().includes(q));
+    return out.slice(0, 80);
+  }
+
+  function paintPaletteSel() {
+    paletteList.querySelectorAll(".pk-item").forEach((row, i) => row.classList.toggle("on", i === paletteIdx));
+  }
+  function renderPaletteList() {
+    paletteItems = paletteEntries();
+    if (paletteIdx >= paletteItems.length) paletteIdx = 0;
+    if (!paletteItems.length) { paletteList.innerHTML = '<div class="pk-empty">没有匹配项</div>'; return; }
+    let last = "";
+    paletteList.innerHTML = paletteItems.map((it, i) => {
+      const head = it.group !== last ? '<div class="pk-group">' + it.group + "</div>" : "";
+      last = it.group;
+      const ic = it.ele ? elementIconHtml({ element: it.ele }) : "";
+      return head +
+        '<div class="pk-item' + (i === paletteIdx ? " on" : "") + '" data-i="' + i + '">' +
+        '<span class="pk-label">' + ic + esc(it.label) + "</span>" +
+        (it.hint ? '<span class="pk-hint">' + esc(it.hint) + "</span>" : "") +
+        "</div>";
+    }).join("");
+  }
+  function movePaletteSel(d) {
+    if (!paletteItems.length) return;
+    paletteIdx = (paletteIdx + d + paletteItems.length) % paletteItems.length;
+    paintPaletteSel();
+    const row = paletteList.querySelector('.pk-item[data-i="' + paletteIdx + '"]');
+    if (row && row.scrollIntoView) row.scrollIntoView({ block: "nearest" });
+  }
+  function ensurePalette() {
+    if (paletteRoot) return;
+    paletteRoot = el("div", "palette-root hidden");
+    paletteRoot.setAttribute("aria-hidden", "true");
+    paletteRoot.innerHTML =
+      '<div class="palette-scrim"></div>' +
+      '<div class="palette" role="dialog" aria-modal="true" aria-label="快速跳转（指令面板）">' +
+      '<input class="palette-input" type="text" placeholder="搜索角色 / 视图 / 操作…" aria-label="搜索角色、视图或操作">' +
+      '<div class="palette-list"></div>' +
+      "</div>";
+    document.body.appendChild(paletteRoot);
+    paletteInput = paletteRoot.querySelector(".palette-input");
+    paletteList = paletteRoot.querySelector(".palette-list");
+    paletteRoot.querySelector(".palette-scrim").addEventListener("click", closePalette);
+    paletteInput.addEventListener("input", () => { paletteIdx = 0; renderPaletteList(); });
+    paletteInput.addEventListener("keydown", e => {
+      if (e.key === "ArrowDown") { e.preventDefault(); movePaletteSel(1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); movePaletteSel(-1); }
+      else if (e.key === "Enter") { e.preventDefault(); const it = paletteItems[paletteIdx]; if (it) runPaletteItem(it); }
+      else if (e.key === "Escape") { e.stopPropagation(); closePalette(); }
+    });
+    paletteList.addEventListener("click", e => {
+      const row = e.target.closest(".pk-item");
+      if (!row) return;
+      const it = paletteItems[+row.dataset.i];
+      if (it) runPaletteItem(it);
+    });
+    paletteList.addEventListener("mousemove", e => {
+      const row = e.target.closest(".pk-item");
+      if (!row) return;
+      const i = +row.dataset.i;
+      if (i !== paletteIdx) { paletteIdx = i; paintPaletteSel(); }
+    });
+  }
+  function openPalette() {
+    ensurePalette();
+    palettePrevFocus = document.activeElement;
+    paletteRoot.classList.remove("hidden");
+    paletteRoot.setAttribute("aria-hidden", "false");
+    paletteInput.value = "";
+    paletteIdx = 0;
+    renderPaletteList();
+    paletteInput.focus();
+  }
+  function closePalette() {
+    if (!paletteRoot || paletteRoot.classList.contains("hidden")) return;
+    paletteRoot.classList.add("hidden");
+    paletteRoot.setAttribute("aria-hidden", "true");
+    if (palettePrevFocus && typeof palettePrevFocus.focus === "function") palettePrevFocus.focus();
+  }
+  function togglePalette() {
+    if (paletteRoot && !paletteRoot.classList.contains("hidden")) closePalette();
+    else openPalette();
+  }
+  function runPaletteItem(it) {
+    closePalette();
+    it.fn();
+  }
+
+  /** 导入预览摘要（R6）：按名字比对「新增 / 更新 / 无变化」+ 藏品件数（只读，不落盘） */
+  function storeDiff(cur, inc) {
+    const curMap = new Map(((cur && cur.roles) || []).map(r => [r.name, r]));
+    let added = 0, updated = 0, same = 0;
+    ((inc && inc.roles) || []).forEach(r => {
+      const c = curMap.get(r.name);
+      if (!c) { added++; return; }
+      try { if (JSON.stringify(c) === JSON.stringify(r)) same++; else updated++; }
+      catch (e) { updated++; }
+    });
+    return { added, updated, same, collCur: ((cur && cur.collection) || []).length, collInc: ((inc && inc.collection) || []).length };
+  }
+
+  // ============ hash 路由（R6）：视图 ⇄ 地址栏（详情按角色名；评估临时对象不进 hash）============
+  function viewKeyOf(v) { return v.type === "detail" ? "detail|" + v.roleId : v.type; }
+  function viewToHash() {
+    if (view.type === "detail") {
+      const r = store.getRole(view.roleId);
+      return r ? "#/role/" + encodeURIComponent(r.name) : "#/";
+    }
+    if (view.type === "evaluate") return "#/eval";
+    if (view.type === "remodel") return "#/remodel";
+    if (view.type === "collection") return "#/collection";
+    return "#/";
+  }
+  function hashToView() {
+    const h = location.hash || "";
+    if (h.indexOf("#/role/") === 0) {
+      const name = decodeURIComponent(h.slice(7));
+      const r = store.getRoles().find(x => x.name === name);
+      return r ? { type: "detail", roleId: r.id } : { type: "list" };
+    }
+    if (h === "#/eval") return { type: "evaluate", evalRoleId: store.getCurrentRole() ? store.getCurrentRole().id : null };
+    if (h === "#/remodel") return { type: "remodel" };
+    if (h === "#/collection") return { type: "collection" };
+    return { type: "list" };
+  }
+
+  // ============ 最近访问（R7）============
+
+  // ⌘K 最近访问（R7）：角色名 LRU ≤20，独立 key（不入主 store）
+  const RECENT_KEY = "gys_recent_roles_v1";
+  function loadRecents() {
+    try {
+      const a = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+      return Array.isArray(a) ? a.filter(x => typeof x === "string").slice(0, 20) : [];
+    } catch (e) { return []; }
+  }
+  function pushRecent(name) {
+    if (!name) return;
+    try {
+      const a = loadRecents().filter(x => x !== name);
+      a.unshift(name);
+      localStorage.setItem(RECENT_KEY, JSON.stringify(a.slice(0, 20)));
+    } catch (e) { /* 静默 */ }
+  }
+
+  /** 新纪录判定（R7）：该件入藏后将刷新哪些位；返回 {n, bucketKey} 或 null（并登记桶标记） */
+  function collRecordWon(art) {
+    const res = core.analyzeCollection(art, store.getCollection());
+    if (!res.inScope) return null;
+    const n = res.rows.filter(r => r.verdict === "new" || r.verdict === "better").length;
+    if (!n) return null;
+    collRecordBuckets.add(res.bucket.key);
+    return { n, bucketKey: res.bucket.key };
+  }
+
   function setupIO() {
     // 「更多」菜单（2026-10-15 批次 5）：导入 / 导出收纳；点外 / Esc 关闭
     const moreWrap = document.querySelector(".more-wrap");
@@ -1962,11 +2330,13 @@
           if (res.rawPreview) console.log("原始 JSON 结构预览：", res.rawPreview);
           return;
         }
-        // 选择导入策略：覆盖 / 合并 / 放弃（三选一）
+        // 导入预览（R6）：先比对差异再落盘（覆盖 / 合并 / 放弃 三选一）
+        const diff = storeDiff(store.getStore(), res.store);
         const mode = await feedback.confirm({
-          title: "选择导入策略",
-          message: `将导入 ${res.store.roles.length} 个角色，请选择合并方式：`,
-          detail: "覆盖 = 用导入数据替换现有全部数据；合并 = 同名角色覆盖、新角色追加。",
+          title: "导入预览",
+          message: `文件中 ${res.store.roles.length} 个角色（当前 ${store.getRoles().length} 个）：` +
+            `新增 ${diff.added} · 更新 ${diff.updated} · 无变化 ${diff.same}；藏品 ${diff.collCur} → ${diff.collInc} 件。`,
+          detail: "覆盖 = 用导入数据替换现有全部数据（当前不在文件中的角色将被移除）；合并 = 同名角色被文件覆盖、新角色追加、其余保留。",
           confirmText: "覆盖数据",
           cancelText: "合并数据"
         });
@@ -2022,6 +2392,63 @@
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
       const box = document.querySelector(".search-box input");
       if (box) { e.preventDefault(); box.focus(); }
+    });
+
+    // ⌘K / Ctrl+K 指令面板（R5）
+    document.addEventListener("keydown", e => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        togglePalette();
+      }
+    });
+    // 全局 Esc 兜底关闭指令面板
+    document.addEventListener("keydown", e => { if (e.key === "Escape") closePalette(); });
+
+    // 粘贴即评估（R5 起；R9：仅「价值评估」页响应——其余页面零打扰）
+    // 评估页内：解析 + 硬校验全过 → 直接开始评估；有误 → 打开录入框（预填 + 自动识别）
+    document.addEventListener("paste", e => {
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      if (view.type !== "evaluate") return;
+      const text = (e.clipboardData && e.clipboardData.getData("text")) || "";
+      if (!detectArtifactText(text)) return;
+      const art = parsePastedArtifact(text);
+      if (art) {
+        pendingArtifact = art;
+        evalHidden.clear();
+        render();
+        feedback.toast("已按粘贴文本开始评估", "success");
+      } else {
+        startAssessFlow(text, true);
+      }
+    });
+
+    // 防误触整页缩放（R11）：触控板双指缩放 / Ctrl+滚轮会触发浏览器级页面缩放——
+    // 该缩放「刷新不回、需关闭标签重开才重置」（file:// 下），表现为「网页整体突然变小」。
+    // 拦截 Ctrl+wheel（Chromium 把触控板 pinch 也上报为带 ctrlKey 的 wheel）；
+    // 键盘 Ctrl+加减号 / Ctrl+0 不受影响（有意缩放仍可用）。
+    window.addEventListener("wheel", e => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+
+    // 底部 Tab（R5）：移动端主导航
+    const tabbar = document.getElementById("tabbar");
+    if (tabbar) {
+      tabbar.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => {
+        if (b.dataset.view === "evaluate") view = { type: "evaluate", evalRoleId: store.getCurrentRole() ? store.getCurrentRole().id : null };
+        else view = { type: b.dataset.view };
+        render();
+      }));
+    }
+    // ⋯ 菜单内的「新建角色」（R5：移动端顶栏瘦身后的入口；菜单自动收起由既有绑定负责）
+    const btnNewRoleM = $("#btnNewRoleM");
+    if (btnNewRoleM) btnNewRoleM.addEventListener("click", createRoleFlow);
+
+    // hash 路由（R6）：首屏按地址栏应用（刷新保位 / 深链）；浏览器后退 → 视图后退
+    if (location.hash && location.hash !== "#/") view = hashToView();
+    window.addEventListener("hashchange", () => {
+      const v = hashToView();
+      if (viewKeyOf(v) === viewKeyOf(view)) return;   // 自身写入触发 / 等价视图 → 不重渲染
+      view = v;
+      render();
     });
 
     $("#logoBtn").addEventListener("click", () => {

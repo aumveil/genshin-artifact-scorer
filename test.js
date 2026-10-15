@@ -1144,6 +1144,13 @@ console.log("== storage 筛选状态持久化（刷新/重开恢复）==");
     && backRole.sets[0] === "绝缘之旗印" && backRole.slot === "" && backRole.mainStat === "",
     "按角色往返一致（件级字段互斥清空）", JSON.stringify(backRole));
 
+  // —— 排序字段（R6）：往返保留；非法值回落 score ——
+  const okSort = storage.saveFilter({ mode: "role", sets: [], sort: "name" });
+  const backSort = storage.loadFilter();
+  assert(okSort === true && backSort && backSort.sort === "name", "排序字段往返一致（R6）", JSON.stringify(backSort));
+  storage.saveFilter({ mode: "role", sets: [], sort: "xx" });
+  assert(storage.loadFilter().sort === "score", "非法排序值 → 回落 score（R6）");
+
   // —— 兼容旧结构 { slot, mainStat, sets }（无 mode）：有件级条件视为按散件，否则按角色 ——
   global.localStorage.setItem(storage.FILTER_KEY, JSON.stringify({ slot: "flower", sets: "x" }));
   const old1 = storage.loadFilter();
@@ -1567,6 +1574,33 @@ console.log("\n== 藏品库（2026-10-11）==");
   const mgNoColl = io.mergeStore({ roles: [], customSets: ["A"] }, inc, "merge");
   assert(Array.isArray(mgNoColl.collection) && mgNoColl.collection.length === 0,
     "mergeStore(merge)：current 无 collection 时补空数组");
+}
+
+console.log("== scoreComposition（R2 分数构成）==");
+{
+  const role = {
+    effectiveStats: ["暴击率", "暴击伤害", "攻击力百分比"],
+    weights: { "暴击率": 1.0, "暴击伤害": 1.0, "攻击力百分比": 0.8 },
+    artifacts: {
+      flower: { slot: "flower", set: "X", mainStat: "生命值", level: 20, substats: [
+        { stat: "暴击率", value: 3.9, activated: true },
+        { stat: "暴击伤害", value: 7.8, activated: true },
+        { stat: "攻击力百分比", value: 5.8, activated: true }] },
+      plume: { slot: "plume", set: "X", mainStat: "攻击力", level: 20, substats: [
+        { stat: "暴击率", value: 3.5, activated: true },
+        { stat: "元素精通", value: 23, activated: true },
+        { stat: "暴击伤害", value: 5.4, activated: false }] }
+    }
+  };
+  const comp = core.scoreComposition(role);
+  assert(Array.isArray(comp) && comp.length === 3, "三项有效词条各成一段（无效 / 待激活不计）", JSON.stringify(comp.map(x => x.label)));
+  const sum = comp.reduce((s, x) => s + x.value, 0);
+  const one = core.calcArtifactScore(role.artifacts.flower, role) + core.calcArtifactScore(role.artifacts.plume, role);
+  assert(closeTo(sum, one, 1e-9), "构成总和 = 单件得分之和（同口径）", sum + " vs " + one);
+  assert(comp[0].stat === "暴击率" && comp[1].stat === "暴击伤害" && comp[2].stat === "攻击力百分比", "按贡献降序", comp.map(x => x.stat).join(" > "));
+  assert(closeTo(comp.reduce((s, x) => s + x.pct, 0), 100, 1e-6), "占比合计 ≈ 100%", comp.reduce((s, x) => s + x.pct, 0));
+  assert(comp.every(x => x.label === C.MAIN_SHORT[x.stat]), "标签走 MAIN_SHORT 简称");
+  assert(core.scoreComposition({ effectiveStats: [], weights: {}, artifacts: {} }).length === 0, "空角色 → 空数组");
 }
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);

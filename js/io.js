@@ -9,6 +9,36 @@
   const C = global.App.constants;
 
   // —— 导出 ——
+  // 备份提醒（R6）：计时用独立 key（不入主 store，避开 6 处透传链与导入合并语义）
+  const BACKUP_KEY = "gys_lastbackup_v1";
+  const BACKUP_SNOOZE_KEY = "gys_backup_snooze_v1";
+
+  /** 记录一次成功导出（重置备份提醒计时） */
+  function markBackupExported() {
+    try { localStorage.setItem(BACKUP_KEY, String(Date.now())); } catch (e) { /* 隐私模式等：静默 */ }
+  }
+
+  /** 备份提醒判定：距上次导出 ≥14 天且期间有变更（或从未导出）→ {days|null, never}；否则 null */
+  function backupReminderDue(store) {
+    try {
+      const roles = (store && store.roles) || [];
+      if (!roles.length) return null;
+      const snooze = Number(localStorage.getItem(BACKUP_SNOOZE_KEY) || 0);
+      if (Date.now() < snooze) return null;
+      const last = Number(localStorage.getItem(BACKUP_KEY) || 0);
+      if (!last) return { days: null, never: true };
+      const maxUpdated = roles.reduce((m, r) => Math.max(m, r.updatedAt || 0), 0);
+      if (maxUpdated <= last) return null;                  // 上次导出后无变更 → 不打扰
+      const days = Math.floor((Date.now() - last) / 86400000);
+      return days >= 14 ? { days, never: false } : null;
+    } catch (e) { return null; }
+  }
+
+  /** 稍后再说（7 天内不再提示） */
+  function snoozeBackupReminder() {
+    try { localStorage.setItem(BACKUP_SNOOZE_KEY, String(Date.now() + 7 * 86400000)); } catch (e) { /* 静默 */ }
+  }
+
   function exportBackup(store) {
     const payload = {
       version: C.STORAGE_VERSION,
@@ -30,6 +60,7 @@
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    markBackupExported();   // R6：备份提醒计时重置
     return fname;
   }
 
@@ -108,5 +139,5 @@
   }
 
   global.App = global.App || {};
-  global.App.io = { exportBackup, readFile, importFile, mergeStore };
+  global.App.io = { exportBackup, readFile, importFile, mergeStore, backupReminderDue, snoozeBackupReminder };
 })(window);

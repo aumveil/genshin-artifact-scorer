@@ -7,6 +7,7 @@
   const C = global.App.constants;
   const KEY = "gys_reliquary_v" + C.STORAGE_VERSION;
   const FILTER_KEY = "gys_reliquary_filter_v" + C.STORAGE_VERSION;   // 首页筛选状态（独立 key，随角色数据分开存）
+  let lastLoadMigrated = false;   // R6：最近一次 load 是否发生迁移改写（供启动时一次性提示）
 
   function emptyStore() {
     return { version: C.STORAGE_VERSION, exportedAt: null, roles: [], customSets: [], collection: [] };
@@ -88,7 +89,9 @@
       // 会出现「导出有、存储没有」的不一致，且每次打开都要重算一遍。
       try {
         const next = JSON.stringify(migrated);
-        if (next !== raw) localStorage.setItem(KEY, next);
+        // 与「原样重序列化」比较（R6 修正）：滤掉缩进等纯格式差异——只有内容真被迁移改写才回写并提示。
+        // 反例：备份文件为 2 空格缩进格式，直接与原文串比较会把每次加载都误判为「已升级」。
+        if (next !== JSON.stringify(data)) { lastLoadMigrated = true; localStorage.setItem(KEY, next); }
       } catch (e) { /* 超容量/隐私模式：静默忽略，本次使用不受影响 */ }
       return migrated;
     } catch (e) {
@@ -96,6 +99,9 @@
       return emptyStore();
     }
   }
+
+  /** 本次加载是否发生过格式迁移改写（R6 启动提示用） */
+  function wasMigrated() { return lastLoadMigrated; }
 
   function save(store) {
     try {
@@ -143,9 +149,11 @@
       const mode = (d.mode === "loose" || d.mode === "role")
         ? d.mode
         : ((slot || mainStat) ? "loose" : "role");
+      // 排序（R6）：score（默认）/ name / element；非法或缺失回落 score
+      const sort = (d.sort === "name" || d.sort === "element") ? d.sort : "score";
       return mode === "loose"
-        ? { mode, slot, mainStat, sets: [], q }            // 按散件：套装条件不参与（互斥）
-        : { mode, slot: "", mainStat: "", sets, q };       // 按角色：件级条件不参与（互斥）
+        ? { mode, slot, mainStat, sets: [], q, sort }            // 按散件：套装条件不参与（互斥）
+        : { mode, slot: "", mainStat: "", sets, q, sort };       // 按角色：件级条件不参与（互斥）
     } catch (e) {
       return null;   // 损坏数据 → 返回 null，由调用方回退默认筛选
     }
@@ -154,9 +162,10 @@
     try {
       const mode = (f && f.mode === "loose") ? "loose" : "role";
       const q = (f && typeof f.q === "string") ? f.q : "";
+      const sort = (f && (f.sort === "name" || f.sort === "element")) ? f.sort : "score";
       const data = mode === "loose"
-        ? { mode, slot: (f && f.slot) || "", mainStat: (f && f.mainStat) || "", sets: [], q }
-        : { mode, slot: "", mainStat: "", sets: (f && Array.isArray(f.sets)) ? f.sets : [], q };
+        ? { mode, slot: (f && f.slot) || "", mainStat: (f && f.mainStat) || "", sets: [], q, sort }
+        : { mode, slot: "", mainStat: "", sets: (f && Array.isArray(f.sets)) ? f.sets : [], q, sort };
       localStorage.setItem(FILTER_KEY, JSON.stringify(data));
       return true;
     } catch (e) {
@@ -165,5 +174,5 @@
   }
 
   global.App = global.App || {};
-  global.App.storage = { load, save, migrate, emptyStore, sanitizeStore, KEY, FILTER_KEY, loadFilter, saveFilter };
+  global.App.storage = { load, save, migrate, emptyStore, sanitizeStore, KEY, FILTER_KEY, loadFilter, saveFilter, wasMigrated };
 })(window);

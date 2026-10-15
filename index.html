@@ -8,11 +8,12 @@
   <title>圣遗物评分</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23000000'/%3E%3Cpath d='M16 6l2.4 6.1L25 13.2l-5 4.1 1.5 6.7L16 20.4l-5.5 3.6L12 17.3l-5-4.1 6.6-1.1z' fill='%23e8c46a'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css">
-  <!-- 外观：首屏渲染前套用已保存的选择，避免闪烁（随 js/appearance.js 一起可删） -->
+  <!-- 外观：首屏渲染前套用已保存的选择（dark/light/auto），避免闪烁（随 js/appearance.js 一起可删） -->
   <script>
     (function () { try {
-      if (localStorage.getItem("gys_appearance_v1") === "light")
-        document.documentElement.setAttribute("data-appearance", "light");
+      var m = localStorage.getItem("gys_appearance_v1") || "dark";
+      var light = m === "light" || (m === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches);
+      if (light) document.documentElement.setAttribute("data-appearance", "light");
     } catch (e) {} })();
   </script>
 </head>
@@ -29,9 +30,9 @@
     <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+    <symbol id="i-auto" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></symbol>
     <symbol id="i-config" viewBox="0 0 24 24"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
-    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3Z"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
     <symbol id="i-warn" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
@@ -67,6 +68,7 @@
           <div class="more-dropdown hidden" id="moreDropdown" aria-label="更多操作">
             <button class="more-item" id="btnImport" title="导入备份或外部数据"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-import"></use></svg>导入</button>
             <button class="more-item" id="btnExport" title="导出完整数据备份"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-export"></use></svg>导出</button>
+            <button class="more-item mobile-only" id="btnNewRoleM" title="新建角色（移动端入口，顶栏已瘦身）"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-plus"></use></svg>新建角色</button>
           </div>
         </div>
         <!-- 外观切换（深+金 ⇄ 浅+蓝）；纯图标无文字，随 js/appearance.js 一起可删 -->
@@ -74,6 +76,14 @@
       </div>
     </div>
   </header>
+
+  <!-- 底部 Tab（R5）：移动端主导航（≤768 显示；桌面隐藏）。高亮由 render() 按当前视图同步 -->
+  <nav class="tabbar" id="tabbar" aria-label="主导航">
+    <button class="tab" type="button" data-view="list" aria-label="角色列表"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-users"></use></svg><span>首页</span></button>
+    <button class="tab" type="button" data-view="evaluate" aria-label="价值评估"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-eval"></use></svg><span>评估</span></button>
+    <button class="tab" type="button" data-view="remodel" aria-label="重塑分析"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-remodel"></use></svg><span>重塑</span></button>
+    <button class="tab" type="button" data-view="collection" aria-label="藏品库"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-collection"></use></svg><span>藏品</span></button>
+  </nav>
 
   <main id="app" class="app"></main>
 
@@ -88,6 +98,7 @@
   <script src="js/storage.js"></script>
   <script src="js/io.js"></script>
   <script src="js/core.js"></script>
+  <script src="js/charts.js"></script>
   <script src="js/feedback.js"></script>
   <script src="js/store.js"></script>
   <script src="js/ui.js"></script>
