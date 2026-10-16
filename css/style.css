@@ -1134,8 +1134,14 @@ body { background: var(--bg-0); }
 .eval-row.eval-row-grid {
   display: grid;
   /* 7 列（2026-10-17 用户反馈：删「潜力」列；原「替换后分」列 → 272px 达成度对照条）：
-     角色名 | 词条差 | 止损容错 | 有效词条（弹性） | 达成度对照条 | 状态标签 | 操作 */
-  grid-template-columns: 86px 88px 88px minmax(140px, 1fr) 272px auto auto;
+     角色名 | 词条差 | 止损容错 | 有效词条（弹性） | 达成度对照条 | 状态标签 | 操作
+     ⚠ 除「有效词条」外**全部定宽**——2026-10-17 用户反馈：标签列原为 auto（内容宽随行变化），
+     会把弹性列压缩出不同宽度 → 其后「达成度对照条」起点在行间漂移（实测最大错位 61px）。
+     每行是独立 grid 容器、不共享轨道，凡内容自适应列都会破坏跨行对齐——勿把任一列改回 auto。
+     135px = 单枚充能徽章实测最宽（"充能补足，还差 15%" 129px）+ 余量；撑不起时（双徽章，罕见）
+     标签列内 flex-wrap 折行兜底。⚠ 改此值会连带影响「有效词条」可分配宽（1440 视口实测 248px，
+     须容纳 4 枚词条 chip ≈ 233px 极限——勿再加大）。 */
+  grid-template-columns: 86px 88px 88px minmax(140px, 1fr) 272px 135px 90px;
   gap: 6px 16px;
   align-items: center;
 }
@@ -1147,8 +1153,10 @@ body { background: var(--bg-0); }
   display: flex; gap: 6px; justify-content: flex-end;
 }
 .eval-row.eval-row-grid .row-actions .btn { margin-left: 0; }
-/* 窄屏降级为 flex 换行，避免 grid 挤压溢出 */
-@media (max-width: 980px) {
+/* 窄屏降级为 flex 换行，避免 grid 挤压溢出
+   （2026-10-17：列全定宽后由 980 提至 1060——实测 ≥1060 无横滚、<1050 溢出；flex 降级下
+    行内 wrap 排列、不再保证列向对齐，属窄屏的既有形态） */
+@media (max-width: 1060px) {
   .eval-row.eval-row-grid { display: flex; flex-wrap: wrap; }
   .eval-row.eval-row-grid .row-actions { margin-left: auto; }
 }
