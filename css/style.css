@@ -1087,10 +1087,12 @@ body { background: var(--bg-0); }
    [当前% 48px][条 基准 160px][替换后% 48px]——金段 = 当前达成度、绿段 = 替换增量；
    数字色同藏品条（当前 --text-1 / 替换后 --green-ink）；浅色下 --brand → 蓝（全站口径）。
    条用 width 表达基准（⚠ 同 coll-bar 先例：flex-basis 不参与固有宽度计算，勿改）；
-   flex:0 1 auto → 弹窗/窄容器随行收缩；数字固定 48px、tabular。 */
+   flex:0 1 auto → 弹窗/窄容器随行收缩；数字固定 48px、tabular。
+   ⚠ 字号随行（font-size: inherit，即 --fs-md 13px——与行内其他数字一致）：
+   2026-10-17 用户指出此前误设 --fs-sm（12px）比行内其他数字小 1px，勿改回。 */
 .eval-row .row-pcts { display: flex; align-items: center; justify-content: center; gap: 8px; flex: 0 1 auto; min-width: 0; }
 .eval-row .row-pct-cur, .eval-row .row-pct-new {
-  flex: 0 0 48px; font-size: var(--fs-sm);
+  flex: 0 0 48px; font-size: inherit;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
