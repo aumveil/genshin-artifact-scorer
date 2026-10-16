@@ -1084,6 +1084,16 @@ body { background: var(--bg-0); }
 .eval-row .row-role:hover { color: var(--brand-strong); }
 .eval-row .row-diff { font-weight: 700; font-variant-numeric: tabular-nums; }
 .eval-row .row-pot, .eval-row .row-pct { color: var(--text-3); font-variant-numeric: tabular-nums; }
+/* 止损容错（2026-10-17，替换视角；弹窗「止损：…」段与独立页列共用）：
+   还可歪 N 次 / 不能歪（二者完全同款，黄；.tight 仅作标记类——与藏品 coll-tol 同先例）/ —（灰）。
+   ⚠ 勿用 .warn 类名（与第 14 节全局「提示条」.warn 撞名）；浅色模式走 --yellow-ink（同 coll-tol）。 */
+.eval-row .row-tol {
+  color: var(--yellow); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.eval-row .row-tol.none { color: var(--text-3-hi); font-weight: 400; }
+[data-appearance="light"] .eval-row .row-tol:not(.none) { color: var(--yellow-ink); }
 .eval-row .row-eff b {
   color: var(--text-1); font-weight: 500; margin-right: 5px; white-space: nowrap;
   padding: 1px 7px; border-radius: 20px;
@@ -1102,7 +1112,7 @@ body { background: var(--bg-0); }
 /* 独立评估页结果行：grid 固定列（所有行共享列轨道 → 各列纵向对齐；横向间距 gap 16px 均匀） */
 .eval-row.eval-row-grid {
   display: grid;
-  grid-template-columns: 86px 88px auto minmax(140px, 1fr) 118px auto auto;
+  grid-template-columns: 86px 88px auto 88px minmax(140px, 1fr) 118px auto auto;
   gap: 6px 16px;
   align-items: center;
 }

@@ -443,6 +443,14 @@ const path = require("path");
       console.log("充能徽章配色[lack→红]:", okClsRed ? "✓" : "✗", tagBadge ? `(${tagBadge.className})` : "（无徽章）");
       if (!okClsRed) process.exitCode = 1;
 
+      // 止损容错列（2026-10-17）：满级件无强化次数 → 「—」灰态（.none），title 含「止损容错」
+      const tolCell = rowQiqi.querySelector(".row-tol");
+      const okTolDash = !!tolCell && tolCell.textContent === "—"
+        && / none/.test(tolCell.className) && /止损容错/.test(tolCell.getAttribute("title") || "");
+      console.log("止损容错列[满级→—]:", okTolDash ? "✓" : "✗",
+        tolCell ? `(${tolCell.textContent} | ${tolCell.className} | ${tolCell.getAttribute("title")})` : "（无单元格）");
+      if (!okTolDash) process.exitCode = 1;
+
       // —— 替换后面板充能应联动更新（原行为：currentER 不变 → 首页仍显示绿色「达标」）——
       const btnReplace = Array.from(rowQiqi.querySelectorAll(".row-actions button")).find(b => b.textContent === "替换");
       btnReplace.click();
@@ -509,6 +517,49 @@ const path = require("path");
         if (btnCancel2) { btnCancel2.click(); await new Promise(r => setTimeout(r, 30)); }
       }
     }
+  }
+
+  // —— 止损容错列（2026-10-17，替换视角·追平口径）：未满级件 → 数字态（还可歪 N 次 / 不能歪）——
+  //    前置：方案 C 已完成替换，七七现役羽 = 新羽（当量 5.6967）
+  {
+    const openNewEval = async (text) => {
+      window.document.getElementById("btnEvaluate").click();
+      await new Promise(r => setTimeout(r, 30));
+      const addBtn = Array.from(app.querySelectorAll("button")).find(b => b.textContent.includes("录入新圣遗物"));
+      if (!addBtn) return null;
+      addBtn.click();
+      await new Promise(r => setTimeout(r, 30));
+      window.document.querySelector(".artifact-text").value = text;
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "识别").click();
+      await new Promise(r => setTimeout(r, 30));
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "保存并评估").click();
+      await new Promise(r => setTimeout(r, 50));
+      return Array.from(app.querySelectorAll(".eval-row"))
+        .find(r => { const n = r.querySelector(".row-role"); return n && n.textContent === "测试-七七"; }) || null;
+    };
+    const abandon = async () => {
+      const btn = Array.from(app.querySelectorAll("button")).find(b => b.textContent === "放弃");
+      if (btn) { btn.click(); await new Promise(r => setTimeout(r, 30)); }
+    };
+
+    // 件 A：Lv.12（剩 2 次）→ 已激活当量 5.087，需 1 次命中追平 5.6967 → 还可歪 1 次
+    const rowA = await openNewEval("死之羽攻击力311+12 攻击力+11.6%·元素充能效率+10.4%·暴击率+5.8%·元素精通+21千岩牢固：(4)");
+    const tolA = rowA ? rowA.querySelector(".row-tol") : null;
+    const okA = !!tolA && tolA.textContent === "还可歪 1 次" && /还需命中 1 次/.test(tolA.getAttribute("title") || "");
+    console.log("止损容错列[未满级→还可歪 1 次]:", okA ? "✓" : "✗",
+      tolA ? `(${tolA.textContent} | ${tolA.getAttribute("title")})` : "（未找到行/单元格）");
+    if (!okA) process.exitCode = 1;
+    await abandon();
+
+    // 件 B：Lv.12（剩 2 次）→ 已激活当量 4.187，需 2 次全中追平 → 不能歪（.tight 标记类）
+    const rowB = await openNewEval("死之羽攻击力311+12 攻击力+8.7%·元素充能效率+7.8%·暴击率+5.8%·元素精通+21千岩牢固：(4)");
+    const tolB = rowB ? rowB.querySelector(".row-tol") : null;
+    const okB = !!tolB && tolB.textContent === "不能歪" && /一次都不能歪/.test(tolB.getAttribute("title") || "")
+      && /row-tol tight/.test(tolB.className);
+    console.log("止损容错列[未满级→不能歪·tight]:", okB ? "✓" : "✗",
+      tolB ? `(${tolB.textContent} | ${tolB.className} | ${tolB.getAttribute("title")})` : "（未找到行/单元格）");
+    if (!okB) process.exitCode = 1;
+    await abandon();
   }
 
   // —— 方案 A 冒烟：无散件（5 件全套装）角色的异套件评估（冗余位自动识别为自由位）——

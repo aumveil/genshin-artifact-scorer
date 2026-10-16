@@ -124,6 +124,7 @@
   /**
    * 核心比较函数（情况一/二共用）：新圣遗物 vs 指定被替换件
    * @returns {Object} worthy/verdict/currentScore/newCurrentScore/potentialScore/remaining/diffToCurrent/newER/tags/newPercent
+   *   stopNeed / stopTolerance：止损容错（2026-10-17）——「追平」口径，仅「未达但满级可追平」的行非 null（见函数内注释）
    */
   function evaluateAgainst(newArtifact, oldArtifact, role) {
     const slot = newArtifact.slot;
@@ -204,6 +205,21 @@
       verdict = worthy ? "值得强化" : "不值得强化";
     }
 
+    // —— 止损容错（2026-10-17 用户要求，「替换角度」版）——
+    // 「追平」口径：新件未达现有件分、但满级可达（diff ≥ 0 与「值得强化」同界）时，
+    // 还需至少命中 stopNeed 次（满挡命中最高权值词条的当量口径，与潜力公式同源）才能追平（≥ curScore）；
+    // stopTolerance = m − stopNeed = 还能歪几次——歪满 (容错+1) 次后即无望（剩余全中满值也追不上）。
+    // ⚠️ 与藏品视角口径的差异（有意为之）：藏品为「严格超过藏品值」，此处为「追平（≥）」（2026-10-17 用户拍板）。
+    // 显示条件：diff ≥ 0 且当前未达（base < curScore）；已达成 / 追不上 / 无可叠加强化（满级等）→ null（UI 显示「—」）。
+    const stopBase = newCurrent + pendingContrib;
+    const stopM = Math.max(0, rem - pending.length);
+    let stopNeed = null, stopTolerance = null;
+    if (diff >= 0 && stopBase < curScore) {
+      for (let k = 0; k <= stopM; k++) {
+        if (stopBase + k * maxWExist >= curScore) { stopNeed = k; stopTolerance = stopM - k; break; }
+      }
+    }
+
     // 替换后评分（仅满级输出，封底 0 分）
     let newPercent = null;
     if (newArtifact.level >= C.MAX_LEVEL) {
@@ -223,6 +239,7 @@
       potentialScore: potential,
       remaining: rem,
       diffToCurrent: diff,
+      stopNeed, stopTolerance, // 止损容错（2026-10-17）：追平口径（≥）；null = 不适用（已达成 / 追不上 / 无强化次数）
       newER, tags, newPercent,
       erConfigured, erOk,      // 充能是否配置 / 替换后是否达标（提示用，不参与判定）
       erDelta,                 // 面板充能变化量（newER − currentER，2 位小数）

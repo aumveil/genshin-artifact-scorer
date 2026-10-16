@@ -1110,6 +1110,35 @@
     return r.case === "自由件" ? "自由件替换" : "散件替换";
   }
 
+  /**
+   * 止损容错显示（2026-10-17）：文案 / tooltip / 三态类名——弹窗情况卡「止损：…」段与独立评估页
+   * 「止损容错」列共用（r = evaluateAgainst 结果）。三态与藏品视角一致：还可歪 N 次 / 不能歪（二者
+   * 完全同款，.tight 仅作标记类）/ —（灰）。stopTolerance == null 的两种成因按 tooltip 区分：
+   * diffToCurrent < 0 → 追不上；否则 → 当前已追平或超过现有件。
+   */
+  function stopLossDisplay(r) {
+    const cur = fmt(r.currentScore);
+    if (r.stopTolerance == null) {
+      const tip = r.diffToCurrent < 0
+        ? `止损容错：剩余强化全中满值也无法追平现有件（${cur}）`
+        : `止损容错：当前已追平或超过现有件（${cur}），不涉及追赶`;
+      return { txt: "—", tip, cls: " none" };
+    }
+    const baseTip = `止损容错：还需命中 ${r.stopNeed} 次才能追平现有件（${cur}）`;
+    if (r.stopTolerance > 0) {
+      return {
+        txt: `还可歪 ${r.stopTolerance} 次`,
+        tip: `${baseTip} · 最多还能歪 ${r.stopTolerance} 次；歪满 ${r.stopTolerance + 1} 次后即无望（剩余全中满值也追不上）`,
+        cls: ""
+      };
+    }
+    return {
+      txt: "不能歪",
+      tip: `${baseTip} · 一次都不能歪；再歪 1 次即无望（剩余全中满值也追不上）`,
+      cls: " tight"
+    };
+  }
+
   /** 待评估新圣遗物摘要卡（独立页与弹窗共用）：**单行紧凑卡**（2026-10-14 用户要求精简）——
    *  [待] 小徽章（替代「待评估新圣遗物」字样）+ 件信息 · 副词条 · [修改][放弃]（右贴）；窄容器自动换行。
    *  操作按钮（可选）：修改（onEdit，两处都传）；放弃（onAbandon，仅独立评估页传——弹窗的「放弃」在 footer）。
@@ -1158,6 +1187,7 @@
       const setSwapWarn = r.isSetSwap
         ? `<div class="warn" style="margin-top:8px">${ico("warn")}替换后该部位将变为「${esc(art.set)}」套装件，角色将失去散件（散件部位将置空）</div>`
         : "";
+      const tol = stopLossDisplay(r);   // 止损容错（2026-10-17）：紧贴潜力段之后，同独立页列序
       card.innerHTML =
         `<div class="c-head"><span class="c-title">${caseLabel(r)}</span>` +
         `<span class="badge ${verdictCls}">${esc(r.verdict)}</span></div>` +
@@ -1165,6 +1195,7 @@
         `<div class="eval-row">` +
         `<span>当前 ${fmt(r.currentScore)}</span>` +
         `<span>潜力 ${fmt(r.potentialScore)}（现 ${fmt(r.newCurrentScore)}${r.remaining ? `，剩${r.remaining}次` : ""}）</span>` +
+        `<span class="row-tol${tol.cls}" title="${esc(tol.tip)}">止损：${tol.txt}</span>` +
         `<span class="${diffCls}">${r.diffToCurrent >= 0 ? "+" : ""}${fmt(r.diffToCurrent)} 词条</span>` +
         (r.newPercent != null ? `<span>替换后 ${r.newPercent.toFixed(1)} 分</span>` : "") +
         `<span>充能 ${fmt(r.newER)}%${r.tags.length ? ` <span class="badge ${erTagCls(r.erTagLevel)}">${esc(r.tags[0])}</span>` : ""}</span>` +
@@ -1362,13 +1393,15 @@
         const effHtml = effArr.length
           ? effArr.map(s => `<b>${esc(C.MAIN_SHORT[s] || s)}<i>${fmt(weights[s] || 0)}</i></b>`).join("")
           : '<span class="eff-none">未配置</span>';
-        // grid 固定列（eval-row-grid）：角色名 | 词条差 | 潜力 | 有效词条 | 替换后分 | 状态标签 | 操作按钮
+        // grid 固定列（eval-row-grid）：角色名 | 词条差 | 潜力 | 止损容错 | 有效词条 | 替换后分 | 状态标签 | 操作按钮
         // 条件列（替换后分/状态标签）以空 span 占位，保证所有行各列起始位置一致（纵向对齐）
+        const tol = stopLossDisplay(r);   // 止损容错（2026-10-17）：追平口径三态（与藏品 coll-tol 同款）
         const row = el("div", "eval-row eval-row-grid");
         row.innerHTML =
           `<span class="row-role" title="点击查看角色详情">${esc(role.name)}</span>` +
           `<span class="row-diff ${diffCls}">${r.diffToCurrent >= 0 ? "+" : ""}${fmt(r.diffToCurrent)} 词条</span>` +
           `<span class="row-pot">潜力 ${fmt(r.potentialScore)}（现 ${fmt(r.newCurrentScore)}${r.remaining ? `，剩${r.remaining}次` : ""}）</span>` +
+          `<span class="row-tol${tol.cls}" title="${esc(tol.tip)}">${tol.txt}</span>` +
           `<span class="row-eff">${effHtml}</span>` +
           `<span class="row-pct">${r.newPercent != null ? `替换后 ${r.newPercent.toFixed(1)} 分` : ""}</span>` +
           // 状态标签：替换后失去散件（情况三）/ 充能提示（2026-09-29：按替换对充能的影响分级配色——不足红 / 补足黄 / 满足绿）

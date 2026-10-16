@@ -274,6 +274,61 @@ console.log("== 潜力仅叠加已有副词条（全无效词条 → 潜力 0）
   assert(!r.worthy, "潜力 0 < 当前散件 → 不值得强化", r.diffToCurrent);
 }
 
+console.log("== 替换视角止损容错（2026-10-17，追平口径）==");
+{
+  // 口径：新件未达现有件分、但满级可达（diff ≥ 0，与「值得强化」同界）——
+  //   need = 最少命中次数（满挡命中最高权值词条，≥ curScore 即追平）；
+  //   tolerance = m − need = 还能歪几次。已达成 / 追不上 / 无可叠加强化（满级）→ 均为 null（UI 显示「—」）。
+  // ⚠️ 与藏品视角的差异：藏品为「严格超过藏品值」，此处为「追平（≥）」（2026-10-17 用户拍板）。
+  const role = { effectiveStats: ["暴击率"], weights: { "暴击率": 1.0 } };
+  const mkNew = (value, level, extra) => ({
+    slot: "flower", set: "X", mainStat: "生命值", level,
+    substats: [{ stat: "暴击率", value, activated: true }, ...(extra || [])]
+  });
+  const mkOld = value => ({ slot: "flower", set: "X", mainStat: "生命值", level: 20,
+    substats: [{ stat: "暴击率", value, activated: true }] });
+
+  // ① 还可歪：现有件 9.75（2.5 当量）；新件 Lv.12（剩 2 次）暴击率 7.8（2.0）
+  //    → 需 1 次命中（2.0 + 1×1.0 = 3.0 ≥ 2.5）→ 容错 = 2 − 1 = 1
+  const r1 = core.evaluateAgainst(mkNew(7.8, 12), mkOld(9.75), role);
+  assert(closeTo(r1.currentScore, 2.5), "止损[还可歪]：现有件当量 2.5", r1.currentScore);
+  assert(closeTo(r1.newCurrentScore, 2.0), "止损[还可歪]：新件当前当量 2.0", r1.newCurrentScore);
+  assert(r1.stopNeed === 1, "止损[还可歪]：need = 1（2.0 + 1×1.0 ≥ 2.5）", r1.stopNeed);
+  assert(r1.stopTolerance === 1, "止损[还可歪]：容错 = 2 − 1 = 1（还可歪 1 次）", r1.stopTolerance);
+
+  // ② 不能歪（全中恰好追平——追平口径的关键格）：新件 Lv.16（剩 1 次）暴击率 5.85（1.5）
+  //    → 潜力 1.5 + 1.0 = 2.5 恰好追平 → need = 1、容错 = 0（严格口径下此格会显示「—」）
+  const r2 = core.evaluateAgainst(mkNew(5.85, 16), mkOld(9.75), role);
+  assert(closeTo(r2.potentialScore, 2.5), "止损[恰好追平]：潜力 = 现有件分（恰好追平）", r2.potentialScore);
+  assert(r2.worthy === true, "止损[恰好追平]：未满级 diff = 0 → 值得强化（与容错显示同界）");
+  assert(r2.stopNeed === 1 && r2.stopTolerance === 0, "止损[恰好追平]：需 1 次全中 → 不能歪（tolerance = 0）", [r2.stopNeed, r2.stopTolerance]);
+
+  // ③ 追不上：潜力 2.5 < 现有件 3.5（13.65）→ null（diff < 0 同步「不值得强化」）
+  const r3 = core.evaluateAgainst(mkNew(5.85, 16), mkOld(13.65), role);
+  assert(r3.worthy === false, "止损[追不上]：不值得强化（diff < 0）");
+  assert(r3.stopNeed === null && r3.stopTolerance === null, "止损[追不上]：need / tolerance = null", [r3.stopNeed, r3.stopTolerance]);
+
+  // ④ 当前已追平 / 已超过 → 不涉及追赶（null）
+  const r4 = core.evaluateAgainst(mkNew(9.75, 16), mkOld(9.75), role);
+  assert(r4.stopTolerance === null, "止损[已追平]：当前已追平 → null（不涉及追赶）", r4.stopTolerance);
+  const r5 = core.evaluateAgainst(mkNew(11.7, 16), mkOld(9.75), role);
+  assert(r5.stopTolerance === null, "止损[已超过]：当前已超过 → null", r5.stopTolerance);
+
+  // ⑤ 满级件：无强化次数 → 永不进入数字态（null）
+  const r6 = core.evaluateAgainst(mkNew(7.8, 20), mkOld(5.85), role);
+  assert(r6.stopNeed === null && r6.stopTolerance === null, "止损[满级]：无强化次数 → null", [r6.stopNeed, r6.stopTolerance]);
+
+  // ⑥ 3 初始待激活件：base 计入待激活贡献、m 扣解锁占用的 1 次（与藏品/潜力同口径）
+  //    新件 Lv.0（m = 5 − 1 = 4）暴击率 7.8（2.0）+ 精通 23 待激活（0.5）→ base = 2.5；
+  //    现有件 15.6（4.0）→ need = 2（2.5 + 2×1.0 = 4.5 ≥ 4.0）→ 容错 = 4 − 2 = 2
+  const role2 = { effectiveStats: ["暴击率", "元素精通"], weights: { "暴击率": 1.0, "元素精通": 0.5 } };
+  const r7 = core.evaluateAgainst(
+    mkNew(7.8, 0, [{ stat: "元素精通", value: 23, activated: false }]),
+    mkOld(15.6), role2);
+  assert(closeTo(r7.potentialScore, 6.5), "止损[3 初始]：潜力 = 2.5 + 4×1.0 = 6.5（解锁占 1 次）", r7.potentialScore);
+  assert(r7.stopNeed === 2 && r7.stopTolerance === 2, "止损[3 初始]：need = 2、容错 = 2（按 m = 4 计）", [r7.stopNeed, r7.stopTolerance]);
+}
+
 console.log("== 0 级副词条档位表（ROLL_TIERS）==");
 {
   // 10 种副属性均有 4 档；第 4 档 = Umax（档位与 Umax 口径一致）
