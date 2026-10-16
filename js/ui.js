@@ -1111,14 +1111,18 @@
   }
 
   /**
-   * 止损容错显示（2026-10-17）：文案 / tooltip / 三态类名——弹窗情况卡「止损：…」段与独立评估页
-   * 「止损容错」列共用（r = evaluateAgainst 结果）。三态与藏品视角一致：还可歪 N 次 / 不能歪（二者
-   * 完全同款，.tight 仅作标记类）/ —（灰）。stopTolerance == null 的两种成因按 tooltip 区分：
-   * diffToCurrent < 0 → 追不上；否则 → 当前已追平或超过现有件。
+   * 止损容错显示（2026-10-17）：文案 / tooltip / 类名——弹窗情况卡「止损：…」段与独立评估页
+   * 「止损容错」列共用（r = evaluateAgainst 结果）。态：还可歪 N 次 / 不能歪（二者完全同款，
+   * .tight 仅作标记类）/ 已满级（满级件，黄同款——2026-10-17 用户要求，原为灰「—」）/ —（灰：
+   * 未满级且不适用，按 tooltip 区分成因）。
    */
   function stopLossDisplay(r) {
     const cur = fmt(r.currentScore);
     if (r.stopTolerance == null) {
+      // 满级件（remaining === 0 ⟺ level ≥ 20）：无剩余强化次数 → 「已满级」，样式与「还可歪/不能歪」同款
+      if (r.remaining === 0) {
+        return { txt: "已满级", tip: "止损容错：该件已满级（无剩余强化次数），不涉及止损追赶", cls: "" };
+      }
       const tip = r.diffToCurrent < 0
         ? `止损容错：剩余强化全中满值也无法追平现有件（${cur}）`
         : `止损容错：当前已追平或超过现有件（${cur}），不涉及追赶`;

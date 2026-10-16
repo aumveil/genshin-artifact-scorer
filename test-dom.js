@@ -443,13 +443,13 @@ const path = require("path");
       console.log("充能徽章配色[lack→红]:", okClsRed ? "✓" : "✗", tagBadge ? `(${tagBadge.className})` : "（无徽章）");
       if (!okClsRed) process.exitCode = 1;
 
-      // 止损容错列（2026-10-17）：满级件无强化次数 → 「—」灰态（.none），title 含「止损容错」
+      // 止损容错列（2026-10-17 用户要求）：满级件 → 「已满级」（黄，与「还可歪/不能歪」同款——非 .none 灰）
       const tolCell = rowQiqi.querySelector(".row-tol");
-      const okTolDash = !!tolCell && tolCell.textContent === "—"
-        && / none/.test(tolCell.className) && /止损容错/.test(tolCell.getAttribute("title") || "");
-      console.log("止损容错列[满级→—]:", okTolDash ? "✓" : "✗",
+      const okTolFull = !!tolCell && tolCell.textContent === "已满级"
+        && !/ none/.test(tolCell.className) && /已满级/.test(tolCell.getAttribute("title") || "");
+      console.log("止损容错列[满级→已满级]:", okTolFull ? "✓" : "✗",
         tolCell ? `(${tolCell.textContent} | ${tolCell.className} | ${tolCell.getAttribute("title")})` : "（无单元格）");
-      if (!okTolDash) process.exitCode = 1;
+      if (!okTolFull) process.exitCode = 1;
 
       // 达成度对照条（2026-10-17）：满级件 → [当前%][条][替换后%]（两数字 + 两段）；替换后有提升 → 右 > 左
       const pcts = rowQiqi.querySelector(".row-pcts");
