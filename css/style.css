@@ -681,10 +681,10 @@ body { background: var(--bg-0); }
   color: var(--brand-strong); font-family: inherit; font-size: var(--fs-md); font-weight: 600;
 }
 .toast-act:hover { text-decoration: underline; }
-/* 移动端底部 Tab（≤768 显示；桌面隐藏）+ ⋯ 菜单移动端项 */
+/* 移动端底部 Tab（R14：≤768 且触摸设备才显示；桌面缩放/窄窗保持桌面形态）+ ⋯ 菜单移动端项 */
 .tabbar { display: none; }
 .more-item.mobile-only { display: none; }
-@media (max-width: 768px) {
+@media (max-width: 768px) and (pointer: coarse) {
   .tabbar {
     display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
     background: var(--glass-1);
