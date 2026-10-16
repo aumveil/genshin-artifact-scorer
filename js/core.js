@@ -211,7 +211,8 @@
     // 还需至少命中 stopNeed 次（满挡命中最高权值词条的当量口径，与潜力公式同源）才能追平（≥ curScore）；
     // stopTolerance = m − stopNeed = 还能歪几次——歪满 (容错+1) 次后即无望（剩余全中满值也追不上）。
     // ⚠️ 与藏品视角口径的差异（有意为之）：藏品为「严格超过藏品值」，此处为「追平（≥）」（2026-10-17 用户拍板）。
-    // 显示条件：diff ≥ 0 且当前未达（base < curScore）；已达成 / 追不上 / 无可叠加强化（满级等）→ null（UI 显示「—」）。
+    // 显示条件：diff ≥ 0 且当前未达（base < curScore）；其余（已达成 / 追不上 / 满级无可叠加强化）→ null。
+    // UI（stopLossDisplay）：满级 null →「已满级」（黄同款）；其余 null →「—」（灰）。
     const stopBase = newCurrent + pendingContrib;
     const stopM = Math.max(0, rem - pending.length);
     let stopNeed = null, stopTolerance = null;

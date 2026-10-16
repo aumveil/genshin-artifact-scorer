@@ -1213,7 +1213,7 @@
       const setSwapWarn = r.isSetSwap
         ? `<div class="warn" style="margin-top:8px">${ico("warn")}替换后该部位将变为「${esc(art.set)}」套装件，角色将失去散件（散件部位将置空）</div>`
         : "";
-      const tol = stopLossDisplay(r);   // 止损容错（2026-10-17）：词条差之后的强化止损线
+      const tol = stopLossDisplay(r);   // 止损容错（2026-10-17）：紧跟「当前」段（原潜力段位——潜力展示已删，见 8.30）
       card.innerHTML =
         `<div class="c-head"><span class="c-title">${caseLabel(r)}</span>` +
         `<span class="badge ${verdictCls}">${esc(r.verdict)}</span></div>` +
@@ -1420,7 +1420,7 @@
           : '<span class="eff-none">未配置</span>';
         // grid 固定列（eval-row-grid）：角色名 | 词条差 | 止损容错 | 有效词条 | 达成度对照条 | 状态标签 | 操作按钮
         // 条件列（对照条/状态标签）以空占位，保证所有行各列起始位置一致（纵向对齐）
-        const tol = stopLossDisplay(r);   // 止损容错（2026-10-17）：追平口径三态（与藏品 coll-tol 同款）
+        const tol = stopLossDisplay(r);   // 止损容错（2026-10-17）：追平口径四态（与藏品 coll-tol 同语言；满级「已满级」见 8.30）
         const row = el("div", "eval-row eval-row-grid");
         row.innerHTML =
           `<span class="row-role" title="点击查看角色详情">${esc(role.name)}</span>` +

@@ -1106,7 +1106,8 @@ body { background: var(--bg-0); }
 .eval-row .row-bar .seg-cur { background: var(--brand); }
 .eval-row .row-bar .seg-delta { background: var(--green); }
 /* 止损容错（2026-10-17，替换视角；弹窗「止损：…」段与独立页列共用）：
-   还可歪 N 次 / 不能歪（二者完全同款，黄；.tight 仅作标记类——与藏品 coll-tol 同先例）/ —（灰）。
+   还可歪 N 次 / 不能歪 / 已满级——三态完全同款（黄；.tight 仅作标记类——与藏品 coll-tol 同先例）；
+   —（灰，未满级的不适用态）。
    ⚠ 勿用 .warn 类名（与第 14 节全局「提示条」.warn 撞名）；浅色模式走 --yellow-ink（同 coll-tol）。 */
 .eval-row .row-tol {
   color: var(--yellow); font-weight: 600;
