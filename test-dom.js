@@ -451,6 +451,22 @@ const path = require("path");
         tolCell ? `(${tolCell.textContent} | ${tolCell.className} | ${tolCell.getAttribute("title")})` : "（无单元格）");
       if (!okTolDash) process.exitCode = 1;
 
+      // 达成度对照条（2026-10-17）：满级件 → [当前%][条][替换后%]（两数字 + 两段）；替换后有提升 → 右 > 左
+      const pcts = rowQiqi.querySelector(".row-pcts");
+      const pctCur = pcts ? pcts.querySelector(".row-pct-cur") : null;
+      const pctNew = pcts ? pcts.querySelector(".row-pct-new") : null;
+      const segs = pcts ? pcts.querySelectorAll(".row-bar > i") : [];
+      const okPcts = !!pcts && !!pctCur && !!pctNew && segs.length === 2
+        && /^\d+\.\d%$/.test(pctCur.textContent) && /^\d+\.\d%$/.test(pctNew.textContent)
+        && parseFloat(pctNew.textContent) > parseFloat(pctCur.textContent);
+      console.log("达成度对照条[满级]:", okPcts ? "✓" : "✗",
+        pcts ? `(${pctCur.textContent} → ${pctNew.textContent}；段 ${segs.length})` : "（无对照条）");
+      if (!okPcts) process.exitCode = 1;
+      // 「潜力」展示已删除（含「现 X，剩 N 次」）——行内不应再出现该文案
+      const okNoPot = !rowQiqi.querySelector(".row-pot") && !/潜力/.test(rowQiqi.textContent);
+      console.log("潜力展示已删除:", okNoPot ? "✓" : "✗", okNoPot ? "" : `（残留：${rowQiqi.textContent}）`);
+      if (!okNoPot) process.exitCode = 1;
+
       // —— 替换后面板充能应联动更新（原行为：currentER 不变 → 首页仍显示绿色「达标」）——
       const btnReplace = Array.from(rowQiqi.querySelectorAll(".row-actions button")).find(b => b.textContent === "替换");
       btnReplace.click();
@@ -549,6 +565,12 @@ const path = require("path");
     console.log("止损容错列[未满级→还可歪 1 次]:", okA ? "✓" : "✗",
       tolA ? `(${tolA.textContent} | ${tolA.getAttribute("title")})` : "（未找到行/单元格）");
     if (!okA) process.exitCode = 1;
+    // 未满级件无替换后分 → 对照条为空占位（保持网格列轨道对齐）
+    const slotA = rowA ? rowA.querySelector(".row-pcts") : null;
+    const okSlotA = !!slotA && slotA.children.length === 0;
+    console.log("对照条[未满级→空占位]:", okSlotA ? "✓" : "✗",
+      slotA ? `(children=${slotA.children.length})` : "（无占位）");
+    if (!okSlotA) process.exitCode = 1;
     await abandon();
 
     // 件 B：Lv.12（剩 2 次）→ 已激活当量 4.187，需 2 次全中追平 → 不能歪（.tight 标记类）

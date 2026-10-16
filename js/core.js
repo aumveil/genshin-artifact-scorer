@@ -123,8 +123,9 @@
 
   /**
    * 核心比较函数（情况一/二共用）：新圣遗物 vs 指定被替换件
-   * @returns {Object} worthy/verdict/currentScore/newCurrentScore/potentialScore/remaining/diffToCurrent/newER/tags/newPercent
+   * @returns {Object} worthy/verdict/currentScore/newCurrentScore/potentialScore/remaining/diffToCurrent/newER/tags/curPercent/newPercent
    *   stopNeed / stopTolerance：止损容错（2026-10-17）——「追平」口径，仅「未达但满级可追平」的行非 null（见函数内注释）
+   *   curPercent / newPercent：替换前 / 替换后的角色达成度%（均仅满级非 null；同分母，供「达成度对照条」）
    */
   function evaluateAgainst(newArtifact, oldArtifact, role) {
     const slot = newArtifact.slot;
@@ -220,10 +221,12 @@
       }
     }
 
-    // 替换后评分（仅满级输出，封底 0 分）
-    let newPercent = null;
+    // 替换前 / 后评分（仅满级输出，封底 0 分）——2026-10-17 起成对返回：
+    //   curPercent = 角色当前（替换前）达成度；newPercent = 替换后达成度（两者同分母 perfectTotal）。
+    let newPercent = null, curPercent = null;
     if (newArtifact.level >= C.MAX_LEVEL) {
       const char = calcCharacterScore(role);
+      curPercent = char.percent;
       const newTotal = char.words - curScore + potential; // 满级 potential == newCurrent
       const newPenalty = erConfigured
         ? Math.max(0, (newER - role.erRequirement) / C.UMAX["元素充能效率"]) * ((role.weights || {})["元素充能效率"] || 0)
@@ -240,7 +243,7 @@
       remaining: rem,
       diffToCurrent: diff,
       stopNeed, stopTolerance, // 止损容错（2026-10-17）：追平口径（≥）；null = 不适用（已达成 / 追不上 / 无强化次数）
-      newER, tags, newPercent,
+      newER, tags, curPercent, newPercent,
       erConfigured, erOk,      // 充能是否配置 / 替换后是否达标（提示用，不参与判定）
       erDelta,                 // 面板充能变化量（newER − currentER，2 位小数）
       erTagLevel               // 充能提示级别：null | "lack"（不足红）| "partial"（补足黄）| "met"（满足绿）

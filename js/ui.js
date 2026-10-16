@@ -1139,6 +1139,28 @@
     };
   }
 
+  /**
+   * 达成度对照条（2026-10-17 用户要求）：[当前% 48px][条][替换后% 48px]——评估弹窗卡与独立页行共用。
+   * 左 = 角色当前（替换前）达成度、右 = 替换后达成度；金段 = 目前、绿段 = 替换带来的增量
+   * （与藏品视角极限度合并条同一视觉语言）。cur/new 为百分比数值（如 75.1），clamp 0~100 展示。
+   * newPct 为 null（未满级件无替换后分）→ 返回空 `.row-pcts` 占位（保证独立页网格列轨道对齐）。
+   */
+  function pctCompareHtml(curPct, newPct) {
+    if (newPct == null) return `<span class="row-pcts"></span>`;
+    const clamp = x => Math.max(0, Math.min(100, isFinite(x) ? x : 0));
+    const cur = clamp(curPct), nw = clamp(newPct);
+    const curTxt = cur.toFixed(1) + "%", newTxt = nw.toFixed(1) + "%";
+    const segA = cur, segB = Math.max(0, nw - cur);
+    return `<span class="row-pcts">` +
+      `<span class="row-pct-cur" title="当前达成度 ${curTxt} · 角色当前总分 ÷ 完美基准">${curTxt}</span>` +
+      `<span class="row-bar" title="达成度对照：当前 ${curTxt} → 替换后 ${newTxt}（金色段 = 目前、绿色段 = 替换带来的增量）">` +
+      `<i class="seg-cur" style="left:0;width:${segA.toFixed(1)}%"></i>` +
+      `<i class="seg-delta" style="left:${segA.toFixed(1)}%;width:${segB.toFixed(1)}%"></i>` +
+      `</span>` +
+      `<span class="row-pct-new" title="替换后达成度 ${newTxt} · 换上这件后的角色总分 ÷ 完美基准">${newTxt}</span>` +
+      `</span>`;
+  }
+
   /** 待评估新圣遗物摘要卡（独立页与弹窗共用）：**单行紧凑卡**（2026-10-14 用户要求精简）——
    *  [待] 小徽章（替代「待评估新圣遗物」字样）+ 件信息 · 副词条 · [修改][放弃]（右贴）；窄容器自动换行。
    *  操作按钮（可选）：修改（onEdit，两处都传）；放弃（onAbandon，仅独立评估页传——弹窗的「放弃」在 footer）。
@@ -1187,17 +1209,16 @@
       const setSwapWarn = r.isSetSwap
         ? `<div class="warn" style="margin-top:8px">${ico("warn")}替换后该部位将变为「${esc(art.set)}」套装件，角色将失去散件（散件部位将置空）</div>`
         : "";
-      const tol = stopLossDisplay(r);   // 止损容错（2026-10-17）：紧贴潜力段之后，同独立页列序
+      const tol = stopLossDisplay(r);   // 止损容错（2026-10-17）：词条差之后的强化止损线
       card.innerHTML =
         `<div class="c-head"><span class="c-title">${caseLabel(r)}</span>` +
         `<span class="badge ${verdictCls}">${esc(r.verdict)}</span></div>` +
         setSwapWarn +
         `<div class="eval-row">` +
         `<span>当前 ${fmt(r.currentScore)}</span>` +
-        `<span>潜力 ${fmt(r.potentialScore)}（现 ${fmt(r.newCurrentScore)}${r.remaining ? `，剩${r.remaining}次` : ""}）</span>` +
         `<span class="row-tol${tol.cls}" title="${esc(tol.tip)}">止损：${tol.txt}</span>` +
         `<span class="${diffCls}">${r.diffToCurrent >= 0 ? "+" : ""}${fmt(r.diffToCurrent)} 词条</span>` +
-        (r.newPercent != null ? `<span>替换后 ${r.newPercent.toFixed(1)} 分</span>` : "") +
+        pctCompareHtml(r.curPercent, r.newPercent) +
         `<span>充能 ${fmt(r.newER)}%${r.tags.length ? ` <span class="badge ${erTagCls(r.erTagLevel)}">${esc(r.tags[0])}</span>` : ""}</span>` +
         `</div>`;
       box.appendChild(card);
@@ -1393,17 +1414,16 @@
         const effHtml = effArr.length
           ? effArr.map(s => `<b>${esc(C.MAIN_SHORT[s] || s)}<i>${fmt(weights[s] || 0)}</i></b>`).join("")
           : '<span class="eff-none">未配置</span>';
-        // grid 固定列（eval-row-grid）：角色名 | 词条差 | 潜力 | 止损容错 | 有效词条 | 替换后分 | 状态标签 | 操作按钮
-        // 条件列（替换后分/状态标签）以空 span 占位，保证所有行各列起始位置一致（纵向对齐）
+        // grid 固定列（eval-row-grid）：角色名 | 词条差 | 止损容错 | 有效词条 | 达成度对照条 | 状态标签 | 操作按钮
+        // 条件列（对照条/状态标签）以空占位，保证所有行各列起始位置一致（纵向对齐）
         const tol = stopLossDisplay(r);   // 止损容错（2026-10-17）：追平口径三态（与藏品 coll-tol 同款）
         const row = el("div", "eval-row eval-row-grid");
         row.innerHTML =
           `<span class="row-role" title="点击查看角色详情">${esc(role.name)}</span>` +
           `<span class="row-diff ${diffCls}">${r.diffToCurrent >= 0 ? "+" : ""}${fmt(r.diffToCurrent)} 词条</span>` +
-          `<span class="row-pot">潜力 ${fmt(r.potentialScore)}（现 ${fmt(r.newCurrentScore)}${r.remaining ? `，剩${r.remaining}次` : ""}）</span>` +
           `<span class="row-tol${tol.cls}" title="${esc(tol.tip)}">${tol.txt}</span>` +
           `<span class="row-eff">${effHtml}</span>` +
-          `<span class="row-pct">${r.newPercent != null ? `替换后 ${r.newPercent.toFixed(1)} 分` : ""}</span>` +
+          pctCompareHtml(r.curPercent, r.newPercent) +
           // 状态标签：替换后失去散件（情况三）/ 充能提示（2026-09-29：按替换对充能的影响分级配色——不足红 / 补足黄 / 满足绿）
           `<span class="row-tag">` +
             (r.isSetSwap ? `<span class="badge badge-yellow">替换后无散件</span>` : "") +

@@ -1083,7 +1083,26 @@ body { background: var(--bg-0); }
 .eval-row .row-role { font-weight: 700; min-width: 76px; cursor: pointer; color: var(--text-1); }
 .eval-row .row-role:hover { color: var(--brand-strong); }
 .eval-row .row-diff { font-weight: 700; font-variant-numeric: tabular-nums; }
-.eval-row .row-pot, .eval-row .row-pct { color: var(--text-3); font-variant-numeric: tabular-nums; }
+/* 达成度对照条（2026-10-17 用户要求：「替换后分」改为对照条，参照藏品极限度合并条语言）：
+   [当前% 48px][条 基准 160px][替换后% 48px]——金段 = 当前达成度、绿段 = 替换增量；
+   数字色同藏品条（当前 --text-1 / 替换后 --green-ink）；浅色下 --brand → 蓝（全站口径）。
+   条用 width 表达基准（⚠ 同 coll-bar 先例：flex-basis 不参与固有宽度计算，勿改）；
+   flex:0 1 auto → 弹窗/窄容器随行收缩；数字固定 48px、tabular。 */
+.eval-row .row-pcts { display: flex; align-items: center; justify-content: center; gap: 8px; flex: 0 1 auto; min-width: 0; }
+.eval-row .row-pct-cur, .eval-row .row-pct-new {
+  flex: 0 0 48px; font-size: var(--fs-sm);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.eval-row .row-pct-cur { text-align: right; color: var(--text-1); }
+.eval-row .row-pct-new { text-align: left; color: var(--green-ink); }
+.eval-row .row-bar {
+  width: 160px; flex: 0 1 auto; min-width: 40px; position: relative;
+  height: 6px; border-radius: 3px; background: var(--bg-3); overflow: hidden;
+}
+.eval-row .row-bar > i { position: absolute; top: 0; height: 100%; }
+.eval-row .row-bar .seg-cur { background: var(--brand); }
+.eval-row .row-bar .seg-delta { background: var(--green); }
 /* 止损容错（2026-10-17，替换视角；弹窗「止损：…」段与独立页列共用）：
    还可歪 N 次 / 不能歪（二者完全同款，黄；.tight 仅作标记类——与藏品 coll-tol 同先例）/ —（灰）。
    ⚠ 勿用 .warn 类名（与第 14 节全局「提示条」.warn 撞名）；浅色模式走 --yellow-ink（同 coll-tol）。 */
@@ -1112,14 +1131,15 @@ body { background: var(--bg-0); }
 /* 独立评估页结果行：grid 固定列（所有行共享列轨道 → 各列纵向对齐；横向间距 gap 16px 均匀） */
 .eval-row.eval-row-grid {
   display: grid;
-  grid-template-columns: 86px 88px auto 88px minmax(140px, 1fr) 118px auto auto;
+  /* 7 列（2026-10-17 用户反馈：删「潜力」列；原「替换后分」列 → 272px 达成度对照条）：
+     角色名 | 词条差 | 止损容错 | 有效词条（弹性） | 达成度对照条 | 状态标签 | 操作 */
+  grid-template-columns: 86px 88px 88px minmax(140px, 1fr) 272px auto auto;
   gap: 6px 16px;
   align-items: center;
 }
 .eval-row.eval-row-grid .row-role {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.eval-row.eval-row-grid .row-pct { color: var(--text-3); }
 .eval-row.eval-row-grid .row-tag { display: flex; justify-content: flex-start; gap: 6px; flex-wrap: wrap; }
 .eval-row.eval-row-grid .row-actions {
   display: flex; gap: 6px; justify-content: flex-end;

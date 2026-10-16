@@ -329,6 +329,35 @@ console.log("== 替换视角止损容错（2026-10-17，追平口径）==");
   assert(r7.stopNeed === 2 && r7.stopTolerance === 2, "止损[3 初始]：need = 2、容错 = 2（按 m = 4 计）", [r7.stopNeed, r7.stopTolerance]);
 }
 
+console.log("== 替换前后达成度（curPercent / newPercent，2026-10-17 对照条口径）==");
+{
+  // curPercent = 角色当前（替换前）达成度；newPercent = 替换后达成度——均仅满级非 null、同分母（供对照条）
+  const role = {
+    looseSlot: "goblet",
+    effectiveStats: ["暴击率", "攻击力百分比"],
+    weights: { "暴击率": 1.0, "攻击力百分比": 1.0 },
+    erRequirement: 180, currentER: 180,
+    artifacts: {
+      goblet: { slot: "goblet", set: "S", mainStat: "火元素伤害加成", level: 20, substats: [
+        { stat: "暴击率", value: 3.9, activated: true }] }
+    }
+  };
+  const char0 = core.calcCharacterScore(role);   // perfectTotal = Σ5 部位（未录部位亦计）——与 curPercent 同源
+  const newCup = { slot: "goblet", set: "S", mainStat: "火元素伤害加成", level: 20, substats: [
+    { stat: "暴击率", value: 7.8, activated: true }] };
+  const r = core.evaluateAgainst(newCup, role.artifacts.goblet, role);
+  assert(closeTo(r.curPercent, char0.adjustedWords / char0.perfect * 100),
+    "对照条：curPercent = 当前达成度（adjustedWords ÷ perfectTotal）", r.curPercent);
+  assert(r.newPercent != null, "对照条[满级]：newPercent 非 null", r.newPercent);
+  assert(closeTo(r.newPercent - r.curPercent, (r.potentialScore - r.currentScore) / char0.perfect * 100),
+    "对照条：Δ% = 提升量 ÷ 完美基准（+1.0 当量）", r.newPercent - r.curPercent);
+  // 未满级件：不计算（返回 null → UI 不渲染对照条，仅空占位）
+  const low = { slot: "goblet", set: "S", mainStat: "火元素伤害加成", level: 12, substats: [
+    { stat: "暴击率", value: 3.9, activated: true }] };
+  const r2 = core.evaluateAgainst(low, role.artifacts.goblet, role);
+  assert(r2.curPercent === null && r2.newPercent === null, "对照条[未满级]：curPercent / newPercent 均 null", [r2.curPercent, r2.newPercent]);
+}
+
 console.log("== 0 级副词条档位表（ROLL_TIERS）==");
 {
   // 10 种副属性均有 4 档；第 4 档 = Umax（档位与 Umax 口径一致）
