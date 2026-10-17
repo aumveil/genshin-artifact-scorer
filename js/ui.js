@@ -1822,8 +1822,16 @@
     const hit = res.rows.filter(r => r.verdict === "better" || r.verdict === "new").length;
     // 2026-10-13（用户要求）：只显示「有可能超过现有藏品」的维度——当前可入藏（new/better）或潜力可超（canExceed），
     // 其余隐藏且不提示。行 = 维度 | 藏品值 | 新件值 | 满级最值 | 止损容错 | 极限度合并条
-    //（值 3 项 + 容错 + 合并条；容错见下方 tolHtml，2026-10-13 用户要求）。
+    //（止损列可能整列不存在——见下方 hasTol；其余值 3 项 + 容错 + 合并条，2026-10-13 用户要求）。
     const visible = res.rows.filter(r => r.verdict === "new" || r.verdict === "better" || r.canExceed);
+    // 止损容错列整列显隐（2026-10-17 B，用户要求）：该列只为「未超过、但满级可超」的维度提供信息
+    //（tolerance 仅 worse && canExceed 行非 null）。满级件 rem = 0 → potential ≡ value → canExceed
+    // 恒 false → 整列 100% 是「—」（无信息量，用户反馈「横线没什么意义」）；未满级件若可见行全是
+    // new / better（已可入藏，不涉及追赶）同样整列为空，一并隐藏。
+    // ⚠ 必须**整列**显隐、不能按行隐藏：每行是独立 flex + space-between、不共享轨道，
+    //   缺一格会让后面的合并条起点逐行漂移（同 §8.30「auto 列致对照条漂移」的坑）。
+    //   列存在时，new / better 行的「—」保留作对齐占位。
+    const hasTol = visible.some(r => r.tolerance != null);
     // 头部徽章三档（2026-10-13 用户要求）：可入藏 N 项（当前有位可占）/ 满级可期（当前无位、但有维度满级后可超）/ 不可入藏（完全无机会）
     const badgeHtml = hit
       ? `<span class="badge badge-green">可入藏 ${hit} 项</span>`
@@ -1835,7 +1843,8 @@
         // 值组带单位（量纲随词条）；每格 title 悬停显示含义（2026-10-13）
         // 止损容错列（2026-10-13 用户要求）位于值组与极限度合并条之间：
         //   「还可歪 N 次」= 再有 N 次「没加到该维度」仍可在满级时追上；歪满 (N+1) 次即无望（剩余全中满值也超不了）。
-        //   「不能歪」= 必须全中；better / new 行（该维度已可直接入藏）不涉及追赶 → 「—」。
+        //   「不能歪」= 必须全中；better / new 行（该维度已可直接入藏）不涉及追赶 → 该格「—」。
+        //   整列无值时不渲染（hasTol，见上），此时行少一格、合并条随 space-between 前移。
         const L = r.label;
         const curTxt = r.cur == null ? '<span class="coll-empty">未收藏</span>' : collVal(r.cur, r.unit);
         const curTip = r.cur == null
@@ -1867,16 +1876,19 @@
           `</span>` +
           `<span class="coll-pct coll-pct-max" title="${esc(maxPctTip)}">${maxPctTxt}</span>` +
           `</span>`;
-        const tolTxt = r.tolerance == null
-          ? "—"
-          : (r.tolerance > 0 ? `还可歪 ${r.tolerance} 次` : "不能歪");
-        const tolTip = r.tolerance == null
-          ? "该维度已可直接入藏，不涉及止损追赶"
-          : (r.tolerance > 0
-            ? `止损容错：还需命中 ${r.need} 次才能超过藏品（${collVal(r.cur, "")}）· 最多还能歪 ${r.tolerance} 次；歪满 ${r.tolerance + 1} 次后即无望（剩余全中满值也追不上）`
-            : `止损容错：还需命中 ${r.need} 次才能超过藏品（${collVal(r.cur, "")}）· 一次都不能歪；再歪 1 次即无望（剩余全中满值也追不上）`);
-        const tolCls = r.tolerance == null ? " none" : (r.tolerance === 0 ? " tight" : "");   // 三态：常规（黄）/ tight（仅标记类，与常规完全同款）/ none（灰）
-        const tolHtml = `<span class="coll-tol${tolCls}" title="${esc(tolTip)}">${tolTxt}</span>`;
+        let tolHtml = "";
+        if (hasTol) {
+          const tolTxt = r.tolerance == null
+            ? "—"
+            : (r.tolerance > 0 ? `还可歪 ${r.tolerance} 次` : "不能歪");
+          const tolTip = r.tolerance == null
+            ? "该维度已可直接入藏，不涉及止损追赶"
+            : (r.tolerance > 0
+              ? `止损容错：还需命中 ${r.need} 次才能超过藏品（${collVal(r.cur, "")}）· 最多还能歪 ${r.tolerance} 次；歪满 ${r.tolerance + 1} 次后即无望（剩余全中满值也追不上）`
+              : `止损容错：还需命中 ${r.need} 次才能超过藏品（${collVal(r.cur, "")}）· 一次都不能歪；再歪 1 次即无望（剩余全中满值也追不上）`);
+          const tolCls = r.tolerance == null ? " none" : (r.tolerance === 0 ? " tight" : "");   // 三态：常规（黄）/ tight（仅标记类，与常规完全同款）/ none（灰）
+          tolHtml = `<span class="coll-tol${tolCls}" title="${esc(tolTip)}">${tolTxt}</span>`;
+        }
         return `<div class="coll-row">` +
           `<span class="coll-dim">${esc(L)}</span>` +
           `<span class="coll-cur" title="${esc(curTip)}">${curTxt}</span>` +
@@ -1887,14 +1899,22 @@
           `</div>`;
       }).join("") + `</div>`
       : "";
+    // 头部结构（2026-10-17 A，用户要求）：标题 | [徽章 + 存入按钮] 一组靠右。
+    // 按钮原为 appendChild 到面板末尾的下一个块级子节点（仅 margin-top:10px）→ 独占一行、
+    // 左对齐、下方空无一物，用户反馈「突兀和浪费」（实测占 34px / 面板高 137 → 103）。
+    // 头部空间充裕（1440 独立页余 914px、640 弹窗余 352px，按钮 87+8），零溢出风险。
+    const btnHtml = hit
+      ? `<button type="button" class="btn btn-primary btn-sm coll-add">存入藏品库</button>`
+      : "";
     box.innerHTML =
       `<div class="c-head"><span class="c-title">藏品视角（${esc(res.bucket.name)}）</span>` +
-      badgeHtml + `</div>` +
+      `<span class="coll-head-right">${badgeHtml}${btnHtml}</span>` +
+      `</div>` +
       listHtml;
 
-    if (hit) {
-      const btn = el("button", "btn btn-primary btn-sm coll-add", "存入藏品库");
-      btn.addEventListener("click", () => {
+    const addBtn = box.querySelector(".coll-add");
+    if (addBtn) {
+      addBtn.addEventListener("click", () => {
         const rec = collRecordWon(art);   // 新纪录（R7）：入藏前判定刷新了哪些位
         const r = store.addCollectionItem(art);
         const removed = ((r && r.removed) || []).length;
@@ -1905,7 +1925,6 @@
         feedback.toast("已存入藏品库" + (removed ? `；${removed} 件旧藏品被完全取代，已移除` : "") +
           (rec ? `；刷新 ${rec.n} 项纪录` : ""), "success");
       });
-      box.appendChild(btn);
     }
     return box;
   }

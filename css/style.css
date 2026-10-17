@@ -1384,6 +1384,8 @@ body { background: var(--bg-0); }
 .coll-new { text-align: right; }
 .coll-max { color: var(--green-ink); text-align: right; }
 /* 止损容错列 = 还可歪 N 次 / 不能歪 / —（灰：已可入藏）
+   ⚠ 该列**整列可能不存在**（2026-10-17 B）：全行 tolerance 为 null 时不渲染（典型 = 满级件），
+     此时行少一格、合并条随 space-between 前移——勿改成按行隐藏（会致合并条起点逐行漂移）。
    「不能歪」与「还可歪」**完全同款**（同色同字重，2026-10-14 用户指定）——仅文案不同；.tight 仅作标记类（测试定位用）。
    左内距 14px（弹窗内与值组的呼吸）；13px 小一号（从属但醒目） */
 .coll-tol {
@@ -1397,7 +1399,8 @@ body { background: var(--bg-0); }
 [data-appearance="light"] .coll-tol:not(.none) { color: var(--yellow-ink); }   /* 值同原 #755d00，收编为统一 ink 变量 */
 /* 极限度合并条（2026-10-14 五版）：[藏品% 48px][条 基准 320px][满级% 48px] 整体成组；
    条两段绝对定位：.seg-cur = 金（目前）、.seg-pot = 绿（满级预期增量）；left/width 由行内 % 指定。
-   独立页组合 432px（条 320）；弹窗随行收缩至组合 172px（条 60px；2026-10-15 复核勘误，原记 140/28 为迭代中间值）。 */
+   独立页组合 432px（条 320）；弹窗随行收缩至组合 172px（条 60px；2026-10-15 复核勘误，原记 140/28 为迭代中间值）。
+   ⚠ 以上几何以「止损列存在」的六格行为准；满级件少一格（§8.34）→ 弹窗组合 344px（条 154px）。 */
 .coll-pcts { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; }
 .coll-panel .coll-pct {
   flex: 0 0 48px; font-size: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1410,7 +1413,17 @@ body { background: var(--bg-0); }
 .coll-panel .coll-pcts .coll-bar > i { position: absolute; top: 0; border-radius: 0; }
 .coll-panel .coll-pcts .seg-cur { background: var(--brand); }
 .coll-panel .coll-pcts .seg-pot { background: var(--green); }
-.coll-add { margin-top: 10px; }
+/* 头部右侧组（2026-10-17 A）：徽章 + 存入按钮同组靠右。
+   按钮原为面板末尾的独立块（margin-top:10px）→ 独占一行；现收进 .c-head 右端，
+   与「详情页/藏品页动作按钮在头部最右」的既有语言一致（R12/R13）。 */
+.coll-panel .coll-head-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.coll-panel .coll-head-right .coll-add { flex: 0 0 auto; }
+/* 窄视口（弹窗 400~480 实测）：标题 135 + 徽章 79 + 按钮 87 + gap 会超出头部宽
+   → 三者均禁止压缩（否则 badge 圆角胶囊内折字、标题折两行），改由 wrap 让右侧组整体掉到第二行靠右。
+   ⚠ 勿改成压缩 title / badge：压缩只会折字而不会换行（flex 先 shrink 再 wrap）。 */
+.coll-panel .c-head { flex-wrap: wrap; row-gap: 6px; }
+.coll-panel .c-head .c-title { flex: 0 0 auto; }
+.coll-panel .coll-head-right .badge { flex: 0 0 auto; white-space: nowrap; }
 
 
 /* 窄屏降级（2026-10-15 批次 3）：不再横向滚动——四列改「首行 = 维度|值|极限度，次行 = 持有件」两行式；

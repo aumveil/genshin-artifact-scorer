@@ -856,14 +856,31 @@ const path = require("path");
     console.log("藏品视角仅显示有机会维度（应 2 行）:", visRows, visRows === 2 ? "✓" : "✗");
     if (visRows !== 2) process.exitCode = 1;
 
-    // 行结构 = 维度|藏品值|新件值|满级最值|止损容错|极限度合并条（六列；合并条列 textContent = 左% + 右% 拼接）
+    // 行结构（2026-10-17 B 起）：本件满级 → 止损容错整列不渲染 → 五列
+    //   = 维度|藏品值|新件值|满级最值|极限度合并条（合并条列 textContent = 左% + 右% 拼接）
+    //   （未满级件的六列形态见下方 panelSoon，其 .coll-tol 断言仍保留）
     const cells0 = Array.from(panel.querySelectorAll(".coll-row")[0].children).map(c => c.textContent.trim());
     const cells1 = Array.from(panel.querySelectorAll(".coll-row")[1].children).map(c => c.textContent.trim());
-    const okCells0 = cells0.join("|") === "双爆|45.2|50.6|50.6|—|82.8%92.7%";
-    const okCells1 = cells1.join("|") === "充能|未收藏|5.2%|5.2%|—|—13.3%";
+    const okCells0 = cells0.join("|") === "双爆|45.2|50.6|50.6|82.8%92.7%";
+    const okCells1 = cells1.join("|") === "充能|未收藏|5.2%|5.2%|—13.3%";
     console.log("行结构[双爆]:", cells0.join(" | "), okCells0 ? "✓" : "✗");
     console.log("行结构[充能]:", cells1.join(" | "), okCells1 ? "✓" : "✗");
     if (!okCells0 || !okCells1) process.exitCode = 1;
+
+    // 2026-10-17 B：满级件（rem=0）可见行恒为 new / better（potential ≡ value → canExceed 恒 false）
+    // → 止损容错整列无值 → 整列不渲染（用户反馈「歪几次显示横线没意义」）
+    const okNoTol = panel.querySelectorAll(".coll-tol").length === 0;
+    console.log("满级件·止损列整列隐藏:", okNoTol ? "✓" : "✗",
+      "| .coll-tol 数 =", panel.querySelectorAll(".coll-tol").length);
+    if (!okNoTol) process.exitCode = 1;
+
+    // 2026-10-17 A：存入按钮收进头部右侧组（.c-head > .coll-head-right），不再独占面板末尾一行
+    const headBtn = panel.querySelector(".c-head .coll-head-right .coll-add");
+    const strayBtn = Array.from(panel.children).some(c => c.classList.contains("coll-add"));
+    const okBtnPos = !!headBtn && !strayBtn && headBtn.textContent === "存入藏品库";
+    console.log("存入按钮位置（头部右侧组 / 面板直接子级无按钮）:", okBtnPos ? "✓" : "✗",
+      "|", headBtn ? headBtn.textContent : "(未在头部找到)");
+    if (!okBtnPos) process.exitCode = 1;
     // 极限度合并条（2026-10-14 五版）：每行 1 条（双爆行 + 充能行 = 2 条）；段 = .seg-cur 金 / .seg-pot 绿（均绝对定位）
     const barCount = panel.querySelectorAll(".coll-bar").length;
     const segCount = panel.querySelectorAll(".coll-pcts .seg-cur, .coll-pcts .seg-pot").length;
