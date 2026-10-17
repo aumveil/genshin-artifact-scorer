@@ -960,6 +960,82 @@ const path = require("path");
     App.store.getCollection().length = 0;
   }
 
+  // —— 场景：残留权值键（weights 含 effectiveStats 之外的词条，2026-10-17 修）——
+  // pendingContrib / maxWExist 必须过 effectiveStats（与 calcArtifactScore 同口径）。
+  // 现网实例钟离：eff = 暴击率/生命值%，weights 残留「生命值」=1 → 0 级、副词条池对钟离全无效的新沙
+  // 曾被算成「+0.41 词条 / 值得强化」（0.80 待激活 + 4×1.00 叠加）；修后潜力 0、不进有价值列表。
+  {
+    const rw = App.store.newRole("测试-残留权值");
+    rw.effectiveStats = ["暴击率", "生命值百分比"];
+    rw.weights = { "暴击率": 1, "生命值": 1, "生命值百分比": 1 };   // 「生命值」= 残留键（不在 eff 内）
+    rw.looseSlot = "sands";
+    rw.erRequirement = 180; rw.currentER = 180;
+    rw.artifacts.sands = {
+      id: App.store.genId(), slot: "sands", set: "黑曜秘典", mainStat: "生命值百分比", level: 20,
+      substats: [
+        { stat: "攻击力", value: 18, activated: true },
+        { stat: "暴击伤害", value: 7.8, activated: true },
+        { stat: "暴击率", value: 17.1, activated: true },
+        { stat: "攻击力百分比", value: 8.2, activated: true }
+      ]
+    };
+    App.store.updateRole(rw);
+    App.ui.render();
+    await new Promise(r => setTimeout(r, 40));
+
+    window.document.getElementById("btnEvaluate").click();
+    await new Promise(r => setTimeout(r, 60));
+    const addRw = Array.from(app.querySelectorAll("button")).find(b => b.textContent.includes("录入新圣遗物"));
+    if (!addRw) { console.log("残留权值键：评估页缺录入入口 ✗"); process.exitCode = 1; }
+    else {
+      addRw.click();
+      await new Promise(r => setTimeout(r, 30));
+      window.document.querySelector(".artifact-text").value =
+        "时之沙生命值7.0%+0·防御力+5.8%·防御力+21元素充能效率+5.8%·生命值+239（待激活）角斗士的终幕礼：（0）";
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "识别").click();
+      await new Promise(r => setTimeout(r, 30));
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "保存并评估").click();
+      await new Promise(r => setTimeout(r, 60));
+      const rowRw = Array.from(app.querySelectorAll(".eval-row"))
+        .find(r => { const n = r.querySelector(".row-role"); return n && n.textContent === "测试-残留权值"; });
+      console.log("残留权值键：全无效词条池不列入有价值:", rowRw ? "✗" : "✓",
+        rowRw ? `（误报 ${rowRw.querySelector(".row-diff").textContent}）` : "");
+      if (rowRw) process.exitCode = 1;
+
+      // ② 同一角色录入一件「对它有价值」且带充能副词条的件 → 行要出现，但不得出现充能徽章
+      //    （2026-10-17：钟离这类「无充」角色不该收到任何充能提示——首页徽章也写着「无充」）
+      addRw.click();
+      await new Promise(r => setTimeout(r, 30));
+      window.document.querySelector(".artifact-text").value =
+        "时之沙生命值7.0%+0 暴击率+3.9%·防御力+21·元素充能效率+6.5%·攻击力+18角斗士的终幕礼：(0)";
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "识别").click();
+      await new Promise(r => setTimeout(r, 30));
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "保存并评估").click();
+      await new Promise(r => setTimeout(r, 60));
+      const rowRw2 = Array.from(app.querySelectorAll(".eval-row"))
+        .find(r => { const n = r.querySelector(".row-role"); return n && n.textContent === "测试-残留权值"; });
+      const tagTxt = rowRw2 ? rowRw2.querySelector(".row-tag").textContent : "";
+      const okNoErTag = !!rowRw2 && !/充能/.test(tagTxt);
+      console.log("残留权值键：无充角色不显示充能徽章:", okNoErTag ? "✓" : "✗",
+        rowRw2 ? `(状态标签「${tagTxt}」)` : "（该行未出现，无法验证）");
+      if (!okNoErTag) process.exitCode = 1;
+    }
+    // 算法值直接核对（页面加载的同一份 core）：潜力 0、diff = −17.1/3.9 ≈ −4.38
+    const rr = App.core.evaluateArtifact({
+      slot: "sands", set: "角斗士的终幕礼", mainStat: "生命值百分比", level: 0,
+      substats: [
+        { stat: "防御力百分比", value: 5.8, activated: true }, { stat: "防御力", value: 21, activated: true },
+        { stat: "元素充能效率", value: 5.8, activated: true }, { stat: "生命值", value: 239, activated: false }
+      ]
+    }, rw).results.find(x => x.case === "散件");
+    const okRwPot = !!rr && Math.abs(rr.potentialScore) < 1e-9 && Math.abs(rr.diffToCurrent + 17.1 / 3.9) < 1e-9;
+    console.log("残留权值键：潜力 0 / diff −4.38:", okRwPot ? "✓" : "✗",
+      rr ? `(${rr.potentialScore.toFixed(4)} / ${rr.diffToCurrent.toFixed(4)})` : "（无散件结论）");
+    if (!okRwPot) process.exitCode = 1;
+    // 清理：移除该脚手架角色，避免影响后续（无后续，但保持 store 干净）
+    App.store.deleteRole(rw.id);
+  }
+
   console.log("捕获错误:", window.__testErrors.length ? window.__testErrors : "无");
   if (window.__testErrors.length) process.exitCode = 1;
   // 退出码 = 累计断言结果。⚠️ 勿写死 process.exit(0)：那会把上面所有 exitCode = 1 全部吞掉，

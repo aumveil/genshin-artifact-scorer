@@ -54,8 +54,21 @@
     return init + 5 * mw;
   }
 
-  /** 充能超额惩罚（直接全扣，不区分来源） */
+  /**
+   * 充能是否适用于该角色：有效词条含「元素充能效率」。
+   * 【唯一来源】算法层与 UI 都读它——首页「无充」徽章、配置弹窗充能输入框禁用、评估结果充能提示，口径必须一致。
+   * 2026-10-17 修：此前算法层只看 erRequirement/currentER 是否有限，不看该角色是否把充能列为有效词条，
+   * 导致 38/77 个「无充」角色仍被算超额惩罚、仍发「充能满足 / 充能不足」提示（与首页「无充」徽章直接矛盾）。
+   * 背景：erRequirement/currentER 是历史字段，取消勾选有效词条时并不立即清空（保存时才写 null），
+   * 导入的旧数据更是普遍保留占位 180/180 ——「有数值」不等于「该角色评估充能」。
+   */
+  function erApplies(role) {
+    return !!((role && role.effectiveStats) || []).includes("元素充能效率");
+  }
+
+  /** 充能超额惩罚（直接全扣，不区分来源）；不看充能的角色恒 0（2026-10-17） */
   function calcEnergyPenalty(role) {
+    if (!erApplies(role)) return 0;                    // 未把充能列为有效词条 → 超额不扣分
     const er = role.erRequirement, cur = role.currentER;
     if (!isFinite(er) || !isFinite(cur)) return 0;
     const excess = Math.max(0, (cur - er) / C.UMAX["元素充能效率"]); // (currentER−req)/6.5%
@@ -73,7 +86,8 @@
     const penalty = calcEnergyPenalty(role);
     const adjustedTotal = total - penalty;
     const tags = [];
-    if (isFinite(role.currentER) && isFinite(role.erRequirement) && role.currentER < role.erRequirement) {
+    // 「充能不足」标签同样只对看充能的角色产生（2026-10-17）——否则首页会给无充角色挂红「充能」徽章
+    if (erApplies(role) && isFinite(role.currentER) && isFinite(role.erRequirement) && role.currentER < role.erRequirement) {
       tags.push(`充能不足，缺 ${(role.erRequirement - role.currentER).toFixed(0)}%`);
     }
     const percent = perfectTotal > 0 ? Math.max(0, adjustedTotal / perfectTotal * 100) : 0;
@@ -105,9 +119,15 @@
   }
 
   // ============ 算法三：圣遗物价值评估（含强化潜力）============
-  /** 剩余未解锁强化次数：max(0, 5 − floor(level/4)) */
+  /**
+   * 剩余未解锁强化次数：max(0, 5 − floor(level/4))。
+   * ⚠️ level 先夹取到 [0, MAX_LEVEL] 再向下取整（2026-10-17 修）：原实现「非整数一律当 0 级」，
+   *   一旦数据里出现小数/负数（导入绕过校验、旧备份、脚本直改 localStorage），潜力会虚高——
+   *   level 20.5 → 当 0 级 → 多算 5 次强化；level −1 → floor(−0.25) = −1 → 6 次（比 0 级还多）。
+   *   UI 录入与 validateArtifact 都要求整数 0~20，故正常数据零影响（全库审计 897 用例未触发）。
+   */
   function remaining(level) {
-    const lv = Number.isInteger(level) ? level : 0;
+    const lv = Number.isFinite(level) ? Math.min(C.MAX_LEVEL, Math.max(0, Math.floor(level))) : 0;
     return Math.max(0, 5 - Math.floor(lv / 4));
   }
 
@@ -132,18 +152,28 @@
     const curScore = calcArtifactScore(oldArtifact, role);
     const newCurrent = calcArtifactScore(newArtifact, role);
 
+    // ⚠️ 「有效词条」判定（2026-10-17 修）：pendingContrib 与 maxWExist 都必须过 `effectiveStats`，
+    //    与 calcArtifactScore / calcRemodel 同口径。role.weights 可能残留**非有效词条**的键
+    //    （角色配置里取消勾选只删 effectiveStats、不清 weights，导入也不校验多余键），
+    //    只查 weights 会把无效词条当成有效：待激活词条凭空计分、强化叠加也能砸在它上面。
+    //    定稿文档 §4.2 明写「若该词条非有效词条，贡献 0」「maxW(slot) = 该部位可用有效词条的最高权值」。
+    //    现网实例：钟离 eff = 暴击率/生命值% 但 weights 残留「生命值」=1，0 级新沙（副条全无效词条池）
+    //    曾被算成 +0.41 词条（0.80 待激活 + 4×1.00 叠加），实为 0 潜力。
+    const eff = role.effectiveStats || [];
     const pending = (newArtifact.substats || []).filter(s => s.activated === false);
     let pendingContrib = 0;
     pending.forEach(s => {
+      if (!eff.includes(s.stat)) return;                       // 非有效词条 → 贡献 0（文档 §4.2）
       const w = (role.weights || {})[s.stat] || 0;
       if (C.UMAX[s.stat]) pendingContrib += (s.value / C.UMAX[s.stat]) * w;
     });
 
     const rem = remaining(newArtifact.level);
     // 强化叠加只能落在「已有副词条（含待激活）」上（游戏机制：副词条种类确定后不再新增）：
-    // 叠加权重 = 已有词条中有效词条的最高权值；若全部为无效词条 → 0（强化对评分无提升）
+    // 叠加权重 = 已有词条中**有效**词条的最高权值；若全部为无效词条 → 0（强化对评分无提升）
     let maxWExist = 0;
     (newArtifact.substats || []).forEach(s => {
+      if (!eff.includes(s.stat)) return;                       // 同上：残留权值键不参与叠加
       const w = (role.weights || {})[s.stat] || 0;
       if (w > maxWExist) maxWExist = w;
     });
@@ -154,10 +184,14 @@
     const newER = (Number.isFinite(role.currentER) ? role.currentER : 0)
                 - ERContrib(oldArtifact) + ERContrib(newArtifact);
 
-    // 「充能已配置」＝ 需求与面板值**都**是有限数值（UI 上两者联动，同有值或同为 null）。
-    // ⚠️ 必须用 Number.isFinite：全局 isFinite(null) 返回 true（Number(null)=0），
+    // 「充能已配置」＝ ①该角色把充能列为有效词条（`erApplies`）且 ②需求与面板值**都**是有限数值。
+    // ⚠️ ① 是 2026-10-17 补的：erRequirement/currentER 是历史字段，取消勾选有效词条不会立即清空，
+    //    导入的旧数据更普遍保留占位 180/180 —— 只看数值有限性会让 38/77 个「无充」角色照发充能提示
+    //    （全库审计 182 例：钟离等角色评估带充能的新件时显示「充能满足」，而首页徽章写着「无充」）。
+    // ⚠️ ② 必须用 Number.isFinite：全局 isFinite(null) 返回 true（Number(null)=0），
     //    会把「未配置充能」当成需求量 0%，进而输出虚假的「充能不足」提示（2026-09-29 修）。
-    const erConfigured = Number.isFinite(role.erRequirement) && Number.isFinite(role.currentER);
+    const erConfigured = erApplies(role)
+      && Number.isFinite(role.erRequirement) && Number.isFinite(role.currentER);
     const erOk = !erConfigured || newER >= role.erRequirement;
 
     // —— 充能提示（2026-09-29 二次口径变更 · 用户指示）——
@@ -201,8 +235,14 @@
       worthy = diff > C.MIN_DIFF;
       verdict = worthy ? "建议替换" : "不建议替换（词条无提升）";
     } else {
-      // 未满级：仅判定是否值得强化
-      worthy = diff >= 0;
+      // 未满级：仅判定是否值得强化。
+      // ⚠️ 除 diff ≥ 0 外还要求潜力 > 0（2026-10-17 用户拍板）：
+      //   新旧件同为 0 分时（该角色对两件都吃不到任何有效词条，含 effectiveStats 为空的角色），
+      //   diff = 0 会让「0 分换 0 分」也显示「+0.00 词条 / 值得强化」。潜力 0 = 强化 5 次也不会有
+      //   任何有效词条可叠加 → 根本没有超越机会，不该判值得（全库审计 22 例：七七/心海/珐露珊的
+      //   0 分现役件，以及爱诺/五郎有效词条为空时的全部位）。
+      //   「恰好追平」不受影响：那种情形潜力必然 > 0（如 2.5 vs 2.5），仍判值得强化。
+      worthy = diff >= 0 && potential > 0;
       verdict = worthy ? "值得强化" : "不值得强化";
     }
 
@@ -733,6 +773,7 @@
 
   global.App.core = {
     calcArtifactScore, calcPerfect, calcEnergyPenalty, calcCharacterScore, scoreComposition,
+    erApplies,   // 充能是否适用（有效词条含「元素充能效率」）——UI 与算法共用同一判定（2026-10-17）
     maxW, remaining, ERContrib, evaluateAgainst, evaluateArtifact, freeSlots,
     expectedHits, calcRemodel, remodelSignature, inferInitialCount, collectRemodelCandidates, wearsSet, remodelTargets, analyzeRemodel,
     // 角色套装字段（2026-10-09）

@@ -112,8 +112,10 @@
     role.artifacts[slot] = JSON.parse(JSON.stringify(newArtifact));
     const next = role.artifacts[slot];
     let erFrom = null, erTo = null, erDelta = 0;
-    if (Number.isFinite(role.currentER)) {
-      const core = global.App.core;
+    // 仅对「看充能」的角色联动（2026-10-17）：erApplies 为假时 currentER 只是历史占位值（多为 180），
+    // 联动它既无意义，又会在用户日后把充能勾成有效词条时留下一个被污染的面板值。
+    const core = global.App.core;
+    if (core.erApplies(role) && Number.isFinite(role.currentER)) {
       // 取 2 位小数：抵消浮点尾差（否则「充能未变化」会被当成有变化，弹出「180% → 180%」提示）
       erDelta = Math.round((core.ERContrib(next) - core.ERContrib(old)) * 100) / 100;
       if (erDelta) {

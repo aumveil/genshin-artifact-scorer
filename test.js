@@ -274,6 +274,115 @@ console.log("== 潜力仅叠加已有副词条（全无效词条 → 潜力 0）
   assert(!r.worthy, "潜力 0 < 当前散件 → 不值得强化", r.diffToCurrent);
 }
 
+console.log("== 残留权值键：weights 含 effectiveStats 之外的词条（2026-10-17 修）==");
+{
+  // 现网实例（钟离）：有效词条只有 暴击率 / 生命值百分比，weights 里残留「生命值」= 1
+  // （配置弹窗取消勾选只删 effectiveStats、不清 weights，导入也不校验多余键）。
+  // 新沙 0 级 3 初始：防御力% 5.8 / 防御力 21 / 充能 5.8% / 生命值 239（待激活）——
+  // 副词条池对钟离四条全无效 → 潜力必须 0；修前被算成 0.80（待激活）+ 4×1.00（叠加）= 4.80 → diff +0.41。
+  const role = {
+    looseSlot: "sands",
+    effectiveStats: ["暴击率", "生命值百分比"],
+    weights: { "暴击率": 1, "生命值": 1, "生命值百分比": 1 },
+    erRequirement: null, currentER: null,
+    artifacts: {
+      sands: { slot: "sands", set: "黑曜秘典", mainStat: "生命值百分比", level: 20, substats: [
+        { stat: "攻击力", value: 18, activated: true }, { stat: "暴击伤害", value: 7.8, activated: true },
+        { stat: "暴击率", value: 17.1, activated: true }, { stat: "攻击力百分比", value: 8.2, activated: true }] }
+    }
+  };
+  const art = { slot: "sands", set: "角斗士的终幕礼", mainStat: "生命值百分比", level: 0, substats: [
+    { stat: "防御力百分比", value: 5.8, activated: true }, { stat: "防御力", value: 21, activated: true },
+    { stat: "元素充能效率", value: 5.8, activated: true }, { stat: "生命值", value: 239, activated: false }] };
+  const r = core.evaluateArtifact(art, role).results.find(x => x.case === "散件");
+  assert(closeTo(r.potentialScore, 0, 1e-9), "残留权值键（钟离实例）：待激活小生命不计潜力 → 潜力 0", r.potentialScore);
+  assert(closeTo(r.diffToCurrent, -17.1 / 3.9, 1e-9), "残留权值键（钟离实例）：diff = −4.38（修前 +0.41）", r.diffToCurrent);
+  assert(!r.worthy && r.verdict === "不值得强化", "残留权值键（钟离实例）：判定「不值得强化」", r.verdict);
+}
+
+console.log("== 0 分换 0 分不判「值得强化」（2026-10-17 用户拍板）==");
+{
+  // 该角色对两件都吃不到有效词条：现役件 0 分 → diff = 0，旧口径 `diff ≥ 0` 会误判「值得强化」，
+  // 评估页出现「+0.00 词条 / 值得强化」。现口径 = diff ≥ 0 **且** potential > 0。
+  const role = {
+    looseSlot: "circlet",
+    effectiveStats: ["暴击率"], weights: { "暴击率": 1 },
+    erRequirement: null, currentER: null,
+    artifacts: {
+      circlet: { slot: "circlet", set: "S", mainStat: "暴击伤害", level: 20, substats: [
+        { stat: "防御力", value: 23, activated: true }] }
+    }
+  };
+  const dead = { slot: "circlet", set: "S", mainStat: "暴击伤害", level: 0, substats: [
+    { stat: "防御力", value: 23, activated: true }, { stat: "生命值百分比", value: 5.8, activated: true },
+    { stat: "攻击力", value: 19, activated: true }, { stat: "元素精通", value: 23, activated: true }] };
+  const r = core.evaluateAgainst(dead, role.artifacts.circlet, role);
+  assert(closeTo(r.potentialScore, 0) && closeTo(r.diffToCurrent, 0), "0 分换 0 分：潜力与差值都是 0", [r.potentialScore, r.diffToCurrent]);
+  assert(r.worthy === false && r.verdict === "不值得强化", "0 分换 0 分：不判值得强化", r.verdict);
+
+  // 反例（防过度修正）：恰好追平仍判值得——潜力 2.5 > 0（10-17 拍板的追平口径不变）
+  const role2 = { looseSlot: "flower", effectiveStats: ["暴击率"], weights: { "暴击率": 1 } };
+  const old2 = { slot: "flower", set: "S", mainStat: "生命值", level: 20, substats: [{ stat: "暴击率", value: 9.75, activated: true }] };
+  const neu2 = { slot: "flower", set: "S", mainStat: "生命值", level: 16, substats: [{ stat: "暴击率", value: 5.85, activated: true }] };
+  const r2 = core.evaluateAgainst(neu2, old2, role2);
+  assert(closeTo(r2.potentialScore, 2.5) && r2.worthy === true, "恰好追平（2.5 = 2.5）：仍判值得强化", [r2.potentialScore, r2.worthy]);
+
+  // 有效词条为空的角色（爱诺/五郎现网状态）：任何件潜力都是 0 → 不判值得
+  const emptyEff = { looseSlot: "flower", effectiveStats: [], weights: {}, erRequirement: null, currentER: null,
+    artifacts: { flower: { slot: "flower", set: "S", mainStat: "生命值", level: 20, substats: [] } } };
+  const anyArt = { slot: "flower", set: "S", mainStat: "生命值", level: 0, substats: [
+    { stat: "暴击率", value: 3.9, activated: true }, { stat: "暴击伤害", value: 7.8, activated: true },
+    { stat: "攻击力百分比", value: 5.8, activated: true }, { stat: "生命值百分比", value: 5.8, activated: true }] };
+  const r3 = core.evaluateAgainst(anyArt, emptyEff.artifacts.flower, emptyEff);
+  assert(r3.potentialScore === 0 && !r3.worthy, "有效词条为空：任何件潜力 0、不判值得", [r3.potentialScore, r3.worthy]);
+}
+
+console.log("== 充能适用性 erApplies：无充角色不算超额、不发提示、不挂标签（2026-10-17 修）==");
+{
+  // 现网口径：erRequirement/currentER 是历史字段，38/77 个「无充」角色仍是占位 180/180
+  // （个别如胡桃 150/180 → currentER > requirement）。「有数值」≠「该角色评估充能」——
+  // 判定统一走 core.erApplies（有效词条含「元素充能效率」），UI 的 hasER 也复用它。
+  const base = {
+    effectiveStats: ["生命值百分比"], weights: { "生命值百分比": 1 },
+    erRequirement: 150, currentER: 200,          // 超额 50% —— 若误按充能角色算会扣 50/6.5 词条
+    artifacts: {
+      flower: { slot: "flower", set: "S", mainStat: "生命值", level: 20, substats: [
+        { stat: "生命值百分比", value: 5.8, activated: true }] }
+    }
+  };
+  assert(core.erApplies(base) === false, "erApplies：eff 不含充能 → false");
+  assert(core.calcEnergyPenalty(base) === 0, "无充角色：超额 50% 也不扣分", core.calcEnergyPenalty(base));
+  const s1 = core.calcCharacterScore(base);
+  assert(s1.tags.length === 0, "无充角色：不产生「充能不足」标签（首页不会挂红徽章）", s1.tags);
+  assert(closeTo(s1.percent, 100 / 30), "无充角色：达成度只由词条决定（1 / 5×6 完美基准）", s1.percent);
+
+  // 同一份数据，只把充能勾成有效词条 → 超额惩罚立即生效（口径只看 effectiveStats）
+  const withER = JSON.parse(JSON.stringify(base));
+  withER.effectiveStats.push("元素充能效率");
+  withER.weights["元素充能效率"] = 1;
+  assert(closeTo(core.calcEnergyPenalty(withER), 50 / 6.5), "看充能角色：超额 50% 扣 50/6.5 词条", core.calcEnergyPenalty(withER));
+  assert(core.calcCharacterScore(withER).tags.length === 0, "看充能角色：currentER ≥ 需求 → 无标签");
+
+  // 评估路径：无充角色 erConfigured = false、无 tags；newER 仍按副词条差算（纯派生字段，UI 门禁后不展示）
+  const old = { slot: "flower", set: "S", mainStat: "生命值", level: 20, substats: [] };
+  const neu = { slot: "flower", set: "S", mainStat: "生命值", level: 0, substats: [
+    { stat: "元素充能效率", value: 6.5, activated: true }] };
+  const r0 = core.evaluateAgainst(neu, old, base);
+  assert(r0.erConfigured === false, "无充角色：评估结果 erConfigured = false", r0.erConfigured);
+  assert(r0.tags.length === 0, "无充角色：评估不发充能提示（全库审计 182 例清零）", r0.tags);
+  assert(closeTo(r0.newER, 206.5), "无充角色：newER 仍算（不参与判定，仅供派生）", r0.newER);
+  const r1 = core.evaluateAgainst(neu, old, withER);
+  assert(r1.erConfigured === true && r1.tags.length > 0, "看充能角色：仍正常发充能提示", r1.tags);
+}
+
+console.log("== remaining：level 夹取（2026-10-17 修）==");
+{
+  assert(core.remaining(20) === 0 && core.remaining(16) === 1 && core.remaining(0) === 5, "正常整数等级不变");
+  assert(core.remaining(20.5) === 0, "小数 20.5 → 按满级（原实现当 0 级，潜力多算 5 次）", core.remaining(20.5));
+  assert(core.remaining(-1) === 5, "负数 -1 → 按 0 级（原实现算出 6 次）", core.remaining(-1));
+  assert(core.remaining(undefined) === 5 && core.remaining(NaN) === 5, "undefined / NaN → 按 0 级");
+}
+
 console.log("== 替换视角止损容错（2026-10-17，追平口径）==");
 {
   // 口径：新件未达现有件分、但满级可达（diff ≥ 0，与「值得强化」同界）——

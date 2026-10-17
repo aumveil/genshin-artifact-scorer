@@ -1,6 +1,7 @@
 /**
  * charts.js - 鉴赏台图形语言（R2 起；R8 收敛）
- * 提供：donut（圆环构成图）/ radar（权值画像雷达）/ heatGrid（藏品版图矩阵）
+ * 提供：donut（圆环构成图）/ heatGrid（藏品版图矩阵）
+ * （radar「权值画像」已在 R8 删除、ui 无调用点，2026-10-17 清理过时注释）
  * 约定：返回 HTML 字符串（与既有 seg 条同源，零依赖）；取色只用 token（--comp-N / grade 类）；
  *       不靠颜色单独载义（每段带数值 / title / aria）。
  */

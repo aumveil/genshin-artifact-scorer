@@ -76,8 +76,9 @@
 
   // 角色是否配置充能：有效词条含「元素充能效率」。不含充能时——充能需求/面板充能不适用（配置禁用），
   // 首页充能徽章与详情页充能信息块均隐藏（充能对评分无影响，避免误导）。
+  // 2026-10-17：改为复用 core.erApplies —— 展示与算法必须同源，否则又会出现「首页写无充、评估页发充能提示」的分裂。
   function hasER(role) {
-    return !!((role && role.effectiveStats) || []).includes("元素充能效率");
+    return core.erApplies(role);
   }
 
   // ============ 渲染入口 ============
@@ -1223,7 +1224,11 @@
         `<span class="row-tol${tol.cls}" title="${esc(tol.tip)}">止损：${tol.txt}</span>` +
         `<span class="${diffCls}">${r.diffToCurrent >= 0 ? "+" : ""}${fmt(r.diffToCurrent)} 词条</span>` +
         pctCompareHtml(r.curPercent, r.newPercent) +
-        `<span>充能 ${fmt(r.newER)}%${r.tags.length ? ` <span class="badge ${erTagCls(r.erTagLevel)}">${esc(r.tags[0])}</span>` : ""}</span>` +
+        // 充能段仅对「看充能」的角色显示（2026-10-17）：无充角色显示「充能 185.8%」毫无意义（首页还写着「无充」），
+        // 且 tags 现已由 core 按 erApplies 门禁为空，若不加这段会留下一串无标签的裸数字。
+        (hasER(role)
+          ? `<span>充能 ${fmt(r.newER)}%${r.tags.length ? ` <span class="badge ${erTagCls(r.erTagLevel)}">${esc(r.tags[0])}</span>` : ""}</span>`
+          : "") +
         `</div>`;
       box.appendChild(card);
     });
