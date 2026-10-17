@@ -1116,16 +1116,12 @@ body { background: var(--bg-0); }
 }
 .eval-row .row-tol.none { color: var(--text-3-hi); font-weight: 400; }
 [data-appearance="light"] .eval-row .row-tol:not(.none) { color: var(--yellow-ink); }
-/* 有效词条胶囊（2026-10-17 用户反馈：菲林斯等 5 词条角色折成两行，行高 +18px）：
-   原内边距 7px / 右间距 5px 下 5 枚最宽 268px → 折行。现压到 5px / 3px（末枚归零）
-   + 权值左间距 2→1px，胶囊形态不变、仅更紧凑。⚠ 勿改回 7/5/2——会重新折行。 */
-.eval-row .row-eff b {
-  color: var(--text-1); font-weight: 500; margin-right: 3px; white-space: nowrap;
-  padding: 1px 5px; border-radius: 20px;
-  background: var(--fill-4); border: 1px solid var(--line-1);
-}
-.eval-row .row-eff b:last-child { margin-right: 0; }
-.eval-row .row-eff b i { font-style: normal; color: var(--brand-strong); margin-left: 1px; font-weight: 600; }
+/* 「有效词条」列（2026-10-17 口径变更，用户要求）：显示**现役件**上属于该角色有效词条的副词条
+   实测值（「暴击 3.1% · 爆伤 28% · 精通 21 · 充能 9.7%」），悬停给「现役件 → 新件」对照。
+   ⚠ 不再用胶囊：4 项数值做成胶囊需 300px+（每条 padding 10 + 边框 2），纯文本 275px 才勉强；
+   胶囊样式（原 b/b i 规则）已随口径删除——勿恢复，否则 3~4 项必然超宽。 */
+.eval-row .row-eff { color: var(--text-1); font-variant-numeric: tabular-nums; }
+.eval-row .row-eff .eff-more { color: var(--text-3); margin-left: 4px; }
 .eval-row .row-eff .eff-none { color: var(--text-3); font-style: italic; }
 .eval-row .btn { margin-left: auto; }
 .eval-row .btn-hide {
