@@ -644,6 +644,66 @@ const path = require("path");
     }
   }
 
+  // —— 评估结果组内排序（2026-10-18 用户要求）：同一情况组内按「+X 词条」降序，不再按角色列表顺序 ——
+  {
+    const MAIN_SORT = { flower: "生命值", plume: "攻击力", sands: "攻击力百分比", goblet: "岩元素伤害加成", circlet: "暴击伤害" };
+    const mkSortRole = (name, cr, cd) => {
+      const r = App.store.newRole(name);
+      r.effectiveStats = ["暴击率", "暴击伤害"];
+      r.weights = { "暴击率": 1, "暴击伤害": 1 };
+      r.looseSlot = null;                       // 5 件全同套 → 冗余位自由件（本场景由情况二接管）
+      r.sets = ["千岩牢固"];
+      r.erRequirement = null; r.currentER = null;
+      Object.keys(MAIN_SORT).forEach(slot => {
+        const subs = slot === "plume"
+          ? [{ stat: "暴击率", value: cr }, { stat: "暴击伤害", value: cd }]
+          : [{ stat: "防御力", value: 21 }, { stat: "元素精通", value: 21 }];
+        r.artifacts[slot] = {
+          id: App.store.genId(), slot, set: "千岩牢固", mainStat: MAIN_SORT[slot], level: 20,
+          substats: subs.concat([{ stat: "防御力百分比", value: 5.8 }, { stat: "元素充能效率", value: 5.2 }])
+            .map(s => ({ stat: s.stat, value: s.value, activated: true }))
+        };
+      });
+      App.store.updateRole(r);
+      return r;
+    };
+    const sortLow = mkSortRole("排序-低", 9.3, 18.7);    // 现役羽接近新件 → 提升小，创建在前
+    const sortHigh = mkSortRole("排序-高", 3.1, 6.2);    // 现役羽差 → 提升大，创建在后
+    window.document.getElementById("btnEvaluate").click();
+    await new Promise(r => setTimeout(r, 30));
+    const btnAddSort = Array.from(app.querySelectorAll("button")).find(b => b.textContent.includes("录入新圣遗物"));
+    if (!btnAddSort) { console.log("组内排序：评估页空态缺录入入口 ✗"); process.exitCode = 1; }
+    else {
+      btnAddSort.click();
+      await new Promise(r => setTimeout(r, 30));
+      window.document.querySelector(".artifact-text").value =
+        "死之羽攻击力311+20·暴击率+10.5%·暴击伤害+21.0%·攻击力百分比+13.5%·元素充能效率+16.5%千岩牢固：(4)";
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "识别").click();
+      await new Promise(r => setTimeout(r, 30));
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "保存并评估").click();
+      await new Promise(r => setTimeout(r, 50));
+      const case2 = app.querySelector(".eval-case.case-2");
+      const order = case2 ? Array.from(case2.querySelectorAll(".row-role")).map(x => x.textContent) : [];
+      const iLow = order.indexOf("排序-低"), iHigh = order.indexOf("排序-高");
+      const okOrder = iLow >= 0 && iHigh >= 0 && iHigh < iLow;
+      console.log("评估组内按词条差降序:", okOrder ? "✓" : "✗", `(case-2 角色序：${order.join(" > ") || "无"})`);
+      if (!okOrder) process.exitCode = 1;
+      // 数值核对：高者的 +X 词条必须大于低者
+      const diffOf = name => {
+        const row = Array.from(app.querySelectorAll(".eval-row"))
+          .find(x => { const n = x.querySelector(".row-role"); return n && n.textContent === name; });
+        return row ? parseFloat(row.querySelector(".row-diff").textContent.replace(/[^\d.+-]/g, "")) : NaN;
+      };
+      const dLow = diffOf("排序-低"), dHigh = diffOf("排序-高");
+      const okVal = dHigh > dLow;
+      console.log("排序依据[高者 +词条 更大]:", okVal ? "✓" : "✗", `(低 ${isNaN(dLow) ? "—" : dLow} / 高 ${isNaN(dHigh) ? "—" : dHigh})`);
+      if (!okVal) process.exitCode = 1;
+    }
+    App.store.deleteRole(sortLow.id);
+    App.store.deleteRole(sortHigh.id);
+    window.App.ui.render();
+  }
+
   // —— 角色套装字段（sets）冒烟：一致性警示条 → 「按实况更新」写回 → 2+2+1 展示 ——
   {
     const rs = App.store.newRole("测试-套装");

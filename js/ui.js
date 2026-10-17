@@ -1413,8 +1413,12 @@
       });
     });
 
+    // 组内排序（2026-10-18 用户要求）：按「加的词条」（行上的 +X 词条 = diffToCurrent）降序——
+    // 同一种使用方式里提升越大的角色越靠前，跨组仍按情况三 > 二 > 一。
+    // ⚠️ 不能改成按角色列表顺序/评分排序：曾按 roles 原序输出，用户看到「+0.10 在 +2.60 上面」判为回归。
+    // diff 相同保持角色列表原序（Array.prototype.sort 稳定）。
     [3, 2, 1].forEach(rank => {
-      const items = groups[rank];
+      const items = groups[rank].slice().sort((a, b) => b.r.diffToCurrent - a.r.diffToCurrent);
       if (!items.length) return;
       const groupBox = el("div", "eval-case case-" + rank);
       items.forEach(({ role, r }) => {
