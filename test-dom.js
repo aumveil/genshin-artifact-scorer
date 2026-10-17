@@ -451,6 +451,15 @@ const path = require("path");
         tolCell ? `(${tolCell.textContent} | ${tolCell.className} | ${tolCell.getAttribute("title")})` : "（无单元格）");
       if (!okTolFull) process.exitCode = 1;
 
+      // 有效词条列（2026-10-17 §8.31）：胶囊组带全量 title——该列强制单行，极端溢出被裁时靠悬停看全
+      const effCell = rowQiqi.querySelector(".row-eff");
+      const effChips = effCell ? Array.from(effCell.querySelectorAll("b")) : [];
+      const okEffTitle = !!effCell && /^有效词条（数字为权值）：/.test(effCell.getAttribute("title") || "")
+        && effChips.length >= 1;
+      console.log("有效词条列[胶囊 + title 全量]:", okEffTitle ? "✓" : "✗",
+        effCell ? `(${effCell.getAttribute("title")} | ${effChips.length} 枚)` : "（无单元格）");
+      if (!okEffTitle) process.exitCode = 1;
+
       // 达成度对照条（2026-10-17）：满级件 → [当前%][条][替换后%]（两数字 + 两段）；替换后有提升 → 右 > 左
       const pcts = rowQiqi.querySelector(".row-pcts");
       const pctCur = pcts ? pcts.querySelector(".row-pct-cur") : null;
