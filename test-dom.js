@@ -452,13 +452,16 @@ const path = require("path");
       if (!okTolFull) process.exitCode = 1;
 
       // 有效词条列（2026-10-17 口径变更）：显示**现役件**上该角色有效副词条的实测值
-      // （「充能 18.1% · 攻击% 9.9%」），悬停给「现役件 → 新件」逐条对照。
+      // （「充能 18.1% · 攻击% 9.9%」）；悬停**逐词条**独立 —— 每个词条自带
+      // 「【旧】充能 18.1%【新】充能 11%」，不再整行一起弹。
       const effCell = rowQiqi.querySelector(".row-eff");
       const effTxt = effCell ? effCell.textContent.trim() : "";
-      const effTip = effCell ? effCell.getAttribute("title") || "" : "";
-      const okEff = !!effCell && /现役件 → 新件：/.test(effTip) && /\d/.test(effTxt);
-      console.log("有效词条列[现役件数值 + 对照 title]:", okEff ? "✓" : "✗",
-        effCell ? `(${effTxt} | ${effTip})` : "（无单元格）");
+      const effSubEls = effCell ? Array.from(effCell.querySelectorAll(".eff-sub")) : [];
+      const okEff = !!effCell && effSubEls.length >= 1 && /\d/.test(effTxt)
+        && effSubEls.every(el => /【旧】.+?【新】/.test(el.getAttribute("title") || ""))
+        && !effCell.getAttribute("title");   // 外层不再挂全量 title
+      console.log("有效词条列[逐词条悬停【旧】/【新】]:", okEff ? "✓" : "✗",
+        effCell ? `(${effTxt} | ${effSubEls.map(el => el.getAttribute("title")).join(" ‖ ")})` : "（无单元格）");
       if (!okEff) process.exitCode = 1;
 
       // 达成度对照条（2026-10-17）：满级件 → [当前%][条][替换后%]（两数字 + 两段）；替换后有提升 → 右 > 左

@@ -1369,7 +1369,7 @@
     wrap.appendChild(head);
     wrap.appendChild(el("div", "info page-info",
       "录入一件新圣遗物后，将自动对全部角色评估，按使用方式优先级列出所有「有提升」的情况。" +
-      "「有效词条」列显示角色当前所穿那件上的有效副词条实测值（超出 3 项折叠为 +N），悬停可看「现役件 → 新件」逐条对照。"));
+      "「有效词条」列显示角色当前所穿那件上的有效副词条实测值，悬停可看「现役件 → 新件」逐条对照。"));
 
     if (!pendingArtifact) return wrap;   // 空态：仅标题 + 说明 + 右上角录入入口（R13 删除引导卡）
 
@@ -1434,27 +1434,31 @@
           .sort((a, b) => ((role.weights || {})[b.stat] || 0) - ((role.weights || {})[a.stat] || 0)
             || subRank(a.stat) - subRank(b.stat));
         const newEffSubs = pickEff(art.substats);
-        // 列宽 258px：4 项数值实测最宽 290px（瓦雷莎·花），3 项最宽约 215px。
-        // 故最多显示 3 项，其余以「+N」折叠，全量见 title——保证任何角色都不裁切、不折行。
-        const MAX_EFF_SHOWN = 3;
+        // 列宽（2026-10-17 第三版）：未满级 **334px** / 满级 **280px**（操作列 auto 让出的空间），字号 13px
+        // —— 4 项最宽 290px（瓦雷莎·花）：未满级全放得下，满级仅瓦雷莎/芙宁娜 2 例裁 3~10px（title 兜底）。
+        // 折叠逻辑仅作防御保留（副词条上限 4 条，正常不会触发）。
+        const MAX_EFF_SHOWN = 4;
         const shownEffSubs = oldEffSubs.slice(0, MAX_EFF_SHOWN);
-        const restEffCount = oldEffSubs.length - shownEffSubs.length;
+        const restEffSubs = oldEffSubs.slice(MAX_EFF_SHOWN);
+        // 悬停口径（2026-10-17 用户要求）：**逐词条**独立提示——悬停哪个词条就只显示它自己的
+        // 【旧】/【新】对照，不再一悬停就把整行条目全列出来；被折叠的「+N」提示那几项。
+        const valOf = (list, st) => {
+          const x = list.find(s => s.stat === st);
+          return x ? `${x.value}${C.STAT_TYPE[st] === "percent" ? "%" : ""}` : "0";
+        };
+        const subTitleOf = st => {
+          const name = C.MAIN_SHORT[st] || st;
+          return `【旧】${name} ${valOf(oldEffSubs, st)}【新】${name} ${valOf(newEffSubs, st)}`;
+        };
         const effHtml = oldEffSubs.length
-          ? `<span class="num">${esc(shownEffSubs.map(fmtSubVal).join(" · "))}</span>` +
-            (restEffCount > 0 ? `<span class="eff-more">+${restEffCount}</span>` : "")
+          ? shownEffSubs.map((s, i) =>
+              (i ? '<span class="eff-sep"> · </span>' : "") +
+              `<span class="eff-sub num" title="${esc(subTitleOf(s.stat))}">${esc(fmtSubVal(s))}</span>`
+            ).join("") +
+            (restEffSubs.length
+              ? `<span class="eff-more" title="${esc(restEffSubs.map(s => subTitleOf(s.stat)).join(" · "))}">+${restEffSubs.length}</span>`
+              : "")
           : '<span class="eff-none">无有效副词条</span>';
-        const effTitle = (() => {
-          const stats = Array.from(new Set(oldEffSubs.concat(newEffSubs).map(s => s.stat)))
-            .sort((a, b) => subRank(a) - subRank(b));
-          if (!stats.length) return "该角色对现役件与新件都没有有效副词条";
-          const valOf = (list, st) => {
-            const x = list.find(s => s.stat === st);
-            return x ? `${x.value}${C.STAT_TYPE[st] === "percent" ? "%" : ""}` : "0";
-          };
-          return "现役件 → 新件：" + stats
-            .map(st => `${C.MAIN_SHORT[st] || st} ${valOf(oldEffSubs, st)} → ${valOf(newEffSubs, st)}`)
-            .join(" · ");
-        })();
         // grid 固定列（eval-row-grid）：角色名 | 词条差 | 止损容错 | 有效词条 | 达成度对照条 | 状态标签 | 操作按钮
         // 条件列（对照条/状态标签）以空占位，保证所有行各列起始位置一致（纵向对齐）
         const tol = stopLossDisplay(r);   // 止损容错（2026-10-17）：追平口径四态（与藏品 coll-tol 同语言；满级「已满级」见 8.30）
@@ -1463,7 +1467,7 @@
           `<span class="row-role" title="点击查看角色详情">${esc(role.name)}</span>` +
           `<span class="row-diff ${diffCls}">${r.diffToCurrent >= 0 ? "+" : ""}${fmt(r.diffToCurrent)} 词条</span>` +
           `<span class="row-tol${tol.cls}" title="${esc(tol.tip)}">${tol.txt}</span>` +
-          `<span class="row-eff" title="${esc(effTitle)}">${effHtml}</span>` +
+          `<span class="row-eff">${effHtml}</span>` +
           pctCompareHtml(r.curPercent, r.newPercent) +
           // 状态标签：替换后失去散件（情况三）/ 充能提示（2026-09-29：按替换对充能的影响分级配色——不足红 / 补足黄 / 满足绿）
           `<span class="row-tag">` +

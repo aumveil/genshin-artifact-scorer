@@ -1117,11 +1117,14 @@ body { background: var(--bg-0); }
 .eval-row .row-tol.none { color: var(--text-3-hi); font-weight: 400; }
 [data-appearance="light"] .eval-row .row-tol:not(.none) { color: var(--yellow-ink); }
 /* 「有效词条」列（2026-10-17 口径变更，用户要求）：显示**现役件**上属于该角色有效词条的副词条
-   实测值（「暴击 3.1% · 爆伤 28% · 精通 21 · 充能 9.7%」），悬停给「现役件 → 新件」对照。
-   ⚠ 不再用胶囊：4 项数值做成胶囊需 300px+（每条 padding 10 + 边框 2），纯文本 275px 才勉强；
-   胶囊样式（原 b/b i 规则）已随口径删除——勿恢复，否则 3~4 项必然超宽。 */
+   实测值（「暴击 3.1% · 爆伤 28% · 精通 21 · 充能 9.7%」）；悬停**逐词条**给
+   「【旧】词条 值【新】词条 值」（每个 .eff-sub 自带 title）。
+   ⚠ 不再用胶囊：4 项做成胶囊需 300px+（每条 padding 10 + 边框 2），纯文本才放得下；
+   胶囊样式（原 b/b i 规则）已随口径删除——勿恢复。 */
 .eval-row .row-eff { color: var(--text-1); font-variant-numeric: tabular-nums; }
-.eval-row .row-eff .eff-more { color: var(--text-3); margin-left: 4px; }
+.eval-row .row-eff .eff-sub { cursor: help; }   /* 逐词条悬停提示：光标给出手感 */
+.eval-row .row-eff .eff-sep { color: var(--text-3); }
+.eval-row .row-eff .eff-more { color: var(--text-3); margin-left: 4px; cursor: help; }
 .eval-row .row-eff .eff-none { color: var(--text-3); font-style: italic; }
 .eval-row .btn { margin-left: auto; }
 .eval-row .btn-hide {
@@ -1134,39 +1137,36 @@ body { background: var(--bg-0); }
 /* 独立评估页结果行：grid 固定列（所有行共享列轨道 → 各列纵向对齐；横向间距 gap 16px 均匀） */
 .eval-row.eval-row-grid {
   display: grid;
-  /* 7 列（2026-10-17 用户反馈：删「潜力」列；原「替换后分」列 → 272px 达成度对照条）：
-     角色名 | 词条差 | 止损容错 | 有效词条（弹性） | 达成度对照条 | 状态标签 | 操作
-     ⚠ 除「有效词条」外**全部定宽**——2026-10-17 用户反馈：标签列原为 auto（内容宽随行变化），
-     会把弹性列压缩出不同宽度 → 其后「达成度对照条」起点在行间漂移（实测最大错位 61px）。
-     每行是独立 grid 容器、不共享轨道，凡内容自适应列都会破坏跨行对齐——勿把任一列改回 auto。
-     135px = 单枚充能徽章实测最宽（"充能补足，还差 15%" 129px）+ 余量；撑不起时（双徽章，罕见）
-     标签列内 flex-wrap 折行兜底。
-     ⚠ 2026-10-17 第二版：词条差 88→84、止损 88→82（两列内容实测 ≤74px，仍有余量），
-     让「有效词条」列从 248px 拿到 258px——全库最宽组合（胡桃 攻击%+生命% = 255px）刚好放下不裁切。
-     勿再把这两列加回去：5 词条角色会掉回「第 5 枚被裁 / 折行」二选一。 */
-  grid-template-columns: 86px 84px 82px minmax(140px, 1fr) 272px 135px 90px;
+  /* 7 列：角色名 | 词条差 | 止损容错 | 有效词条（弹性） | 达成度对照条 | 状态标签 | 操作
+     ⚠ 除「有效词条」与「操作」外**全部定宽**——内容自适应列会把弹性列压出不同宽度，
+     令其后「达成度对照条」起点行间漂移（实测 61px）。每行是独立 grid 容器、不共享轨道，
+     勿把角色名/词条差/止损/标签改回 auto。
+     「操作」列用 auto（2026-10-17 第三版）：宽度 = 该行按钮实际宽——未满级只有 ×（32px）、
+     满级为「× + 替换」（86px）。**同一屏内所有行的等级相同 → 操作列宽一致 → 对照条起点仍严格对齐**；
+     这样未满级件不再预留那 56px 空位，腾出的宽度直接给「有效词条」列（278 → 334px）。
+     ⚠ 标签列 131 = 最长徽章 129 + 2——再挤就截断。 */
+  grid-template-columns: 78px 81px 79px minmax(140px, 1fr) 272px 131px auto;
   gap: 6px 16px;
   align-items: center;
 }
 .eval-row.eval-row-grid .row-role {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.eval-row.eval-row-grid .row-tag { display: flex; justify-content: flex-start; gap: 6px; flex-wrap: wrap; }
-/* 「有效词条」列强制单行（2026-10-17）：折行会让该行比同组行高 +18px（菲林斯 58px vs 40px），
-   且第 5 枚孤悬第二行。列宽 258px 下全库最宽组合（胡桃 3 短 + 2 长 = 255px）单行放下；
-   极端溢出（未来 >5 枚）裁切兜底，完整词条见 title。⚠ 勿去掉 nowrap——那等于恢复折行。 */
-.eval-row.eval-row-grid .row-eff { white-space: nowrap; overflow: hidden; }
-/* 视口 <1200 时列宽不足（结果行宽 = 视口 − 75，行内固定开销 867px，须 ≥255px 才放得下最宽组合，
-   即 row ≥1122、视口 ≥1197）→ 恢复折行：宁可该行高 +18px，也不静默裁掉词条。
-   ⚠ 断点曾误设 1159，实测 1160~1199 区间单行但裁切 6~26px（菲林斯 scrollW 244 vs 列宽 218）；
-   与 1060 的 flex 降级无关——后者是整行重排，不影响此处。 */
-@media (max-width: 1199px) {
-  .eval-row.eval-row-grid .row-eff { white-space: normal; overflow: visible; }
-}
+/* 徽章右对齐 + 操作列内部右对齐（2026-10-17 用户要求）：
+   按钮贴行末，徽章贴按钮左侧 → 两者只隔一个 gap（16px），原「徽章↔×」97px 空白不再出现。 */
+.eval-row.eval-row-grid .row-tag { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .eval-row.eval-row-grid .row-actions {
   display: flex; gap: 6px; justify-content: flex-end;
 }
 .eval-row.eval-row-grid .row-actions .btn { margin-left: 0; }
+/* 「有效词条」列强制单行：折行会让该行比同组行高 +18px。未满级件下列宽 334px，
+   全库最宽 4 项（瓦雷莎·花 290px）也放得下；满级件列宽 280px（操作列要容纳两个按钮），
+   仅瓦雷莎 290 / 芙宁娜 283 两例 4 项会被裁 3~10px（title 有全量）。 */
+.eval-row.eval-row-grid .row-eff { white-space: nowrap; overflow: hidden; }
+/* 视口 <1200 时列宽不足 → 恢复折行：宁可该行高 +18px，也不静默裁掉词条。 */
+@media (max-width: 1199px) {
+  .eval-row.eval-row-grid .row-eff { white-space: normal; overflow: visible; }
+}
 /* 窄屏降级为 flex 换行，避免 grid 挤压溢出
    （2026-10-17：列全定宽后由 980 提至 1060——实测 ≥1060 无横滚、<1050 溢出；flex 降级下
     行内 wrap 排列、不再保证列向对齐，属窄屏的既有形态） */
