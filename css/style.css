@@ -1116,12 +1116,16 @@ body { background: var(--bg-0); }
 }
 .eval-row .row-tol.none { color: var(--text-3-hi); font-weight: 400; }
 [data-appearance="light"] .eval-row .row-tol:not(.none) { color: var(--yellow-ink); }
+/* 有效词条胶囊（2026-10-17 用户反馈：菲林斯等 5 词条角色折成两行，行高 +18px）：
+   原内边距 7px / 右间距 5px 下 5 枚最宽 268px → 折行。现压到 5px / 3px（末枚归零）
+   + 权值左间距 2→1px，胶囊形态不变、仅更紧凑。⚠ 勿改回 7/5/2——会重新折行。 */
 .eval-row .row-eff b {
-  color: var(--text-1); font-weight: 500; margin-right: 5px; white-space: nowrap;
-  padding: 1px 7px; border-radius: 20px;
+  color: var(--text-1); font-weight: 500; margin-right: 3px; white-space: nowrap;
+  padding: 1px 5px; border-radius: 20px;
   background: var(--fill-4); border: 1px solid var(--line-1);
 }
-.eval-row .row-eff b i { font-style: normal; color: var(--brand-strong); margin-left: 2px; font-weight: 600; }
+.eval-row .row-eff b:last-child { margin-right: 0; }
+.eval-row .row-eff b i { font-style: normal; color: var(--brand-strong); margin-left: 1px; font-weight: 600; }
 .eval-row .row-eff .eff-none { color: var(--text-3); font-style: italic; }
 .eval-row .btn { margin-left: auto; }
 .eval-row .btn-hide {
@@ -1140,9 +1144,11 @@ body { background: var(--bg-0); }
      会把弹性列压缩出不同宽度 → 其后「达成度对照条」起点在行间漂移（实测最大错位 61px）。
      每行是独立 grid 容器、不共享轨道，凡内容自适应列都会破坏跨行对齐——勿把任一列改回 auto。
      135px = 单枚充能徽章实测最宽（"充能补足，还差 15%" 129px）+ 余量；撑不起时（双徽章，罕见）
-     标签列内 flex-wrap 折行兜底。⚠ 改此值会连带影响「有效词条」可分配宽（1440 视口实测 248px，
-     须容纳 4 枚词条 chip ≈ 233px 极限——勿再加大）。 */
-  grid-template-columns: 86px 88px 88px minmax(140px, 1fr) 272px 135px 90px;
+     标签列内 flex-wrap 折行兜底。
+     ⚠ 2026-10-17 第二版：词条差 88→84、止损 88→82（两列内容实测 ≤74px，仍有余量），
+     让「有效词条」列从 248px 拿到 258px——全库最宽组合（胡桃 攻击%+生命% = 255px）刚好放下不裁切。
+     勿再把这三列加回去：5 词条角色会掉回「第 5 枚被裁 / 折行」二选一。 */
+  grid-template-columns: 86px 84px 82px minmax(140px, 1fr) 272px 135px 90px;
   gap: 6px 16px;
   align-items: center;
 }
@@ -1150,6 +1156,15 @@ body { background: var(--bg-0); }
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .eval-row.eval-row-grid .row-tag { display: flex; justify-content: flex-start; gap: 6px; flex-wrap: wrap; }
+/* 「有效词条」列强制单行（2026-10-17）：折行会让该行比同组行高 +18px（菲林斯 58px vs 40px），
+   且第 5 枚孤悬第二行。列宽 258px 下全库最宽组合（胡桃 3 短 + 2 长 = 255px）单行放下；
+   极端溢出（未来 >5 枚）裁切兜底，完整词条见 title。⚠ 勿去掉 nowrap——那等于恢复折行。 */
+.eval-row.eval-row-grid .row-eff { white-space: nowrap; overflow: hidden; }
+/* 视口 <1160 时弹性列不足 255px（行内固定开销 867px），单行会静默裁掉词条 →
+   恢复折行：宁可该行高 +18px，也不丢信息（≤1060 另有 flex 降级） */
+@media (max-width: 1159px) {
+  .eval-row.eval-row-grid .row-eff { white-space: normal; overflow: visible; }
+}
 .eval-row.eval-row-grid .row-actions {
   display: flex; gap: 6px; justify-content: flex-end;
 }
@@ -1160,6 +1175,7 @@ body { background: var(--bg-0); }
 @media (max-width: 1060px) {
   .eval-row.eval-row-grid { display: flex; flex-wrap: wrap; }
   .eval-row.eval-row-grid .row-actions { margin-left: auto; }
+  /* 词条列在 ≤1159 已恢复折行（见上），此处无需重复 */
 }
 
 /* 模式切换 */

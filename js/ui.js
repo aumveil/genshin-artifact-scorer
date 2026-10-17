@@ -1423,6 +1423,10 @@
         const effHtml = effArr.length
           ? effArr.map(s => `<b>${esc(C.MAIN_SHORT[s] || s)}<i>${fmt(weights[s] || 0)}</i></b>`).join("")
           : '<span class="eff-none">未配置</span>';
+        // 该列强制单行（2026-10-17，5 枚词条不再折行）——极端溢出会被裁切，全量走 title
+        const effTitle = effArr.length
+          ? "有效词条（数字为权值）：" + effArr.map(s => `${C.MAIN_SHORT[s] || s} ${fmt(weights[s] || 0)}`).join(" · ")
+          : "该角色未配置有效词条";
         // grid 固定列（eval-row-grid）：角色名 | 词条差 | 止损容错 | 有效词条 | 达成度对照条 | 状态标签 | 操作按钮
         // 条件列（对照条/状态标签）以空占位，保证所有行各列起始位置一致（纵向对齐）
         const tol = stopLossDisplay(r);   // 止损容错（2026-10-17）：追平口径四态（与藏品 coll-tol 同语言；满级「已满级」见 8.30）
@@ -1431,7 +1435,7 @@
           `<span class="row-role" title="点击查看角色详情">${esc(role.name)}</span>` +
           `<span class="row-diff ${diffCls}">${r.diffToCurrent >= 0 ? "+" : ""}${fmt(r.diffToCurrent)} 词条</span>` +
           `<span class="row-tol${tol.cls}" title="${esc(tol.tip)}">${tol.txt}</span>` +
-          `<span class="row-eff">${effHtml}</span>` +
+          `<span class="row-eff" title="${esc(effTitle)}">${effHtml}</span>` +
           pctCompareHtml(r.curPercent, r.newPercent) +
           // 状态标签：替换后失去散件（情况三）/ 充能提示（2026-09-29：按替换对充能的影响分级配色——不足红 / 补足黄 / 满足绿）
           `<span class="row-tag">` +
