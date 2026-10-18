@@ -1038,10 +1038,11 @@ body { background: var(--bg-0); }
 .eval-case .diff-pos { color: var(--green-ink); font-weight: 700; }
 .eval-case .diff-neg { color: var(--red-ink); font-weight: 700; }
 
-/* 情况优先级（三 > 二 > 一）：金色 > 紫色 > 灰蓝，左侧色条 + 同色边框 */
+/* 情况优先级（三 > 二 > 一 > 零 首次装备）：金色 > 紫色 > 灰蓝 > 绿（绿 = 从无到有的正向增益） */
 .eval-case.case-3 { border-left: 3px solid var(--brand); }
 .eval-case.case-2 { border-left: 3px solid var(--purple); }
 .eval-case.case-1 { border-left: 3px solid var(--gray); }
+.eval-case.case-0 { border-left: 3px solid var(--green); }
 
 /* 新件摘要卡 */
 .art-summary { font-size: var(--fs-base); font-weight: 600; margin-bottom: 4px; color: var(--text-1); }
@@ -1071,6 +1072,7 @@ body { background: var(--bg-0); }
 .legend .s3 { background: var(--brand); }
 .legend .s2 { background: var(--purple); }
 .legend .s1 { background: var(--gray); }
+.legend .s0 { background: var(--green); }
 
 /* 紧凑结果行 */
 .eval-row {

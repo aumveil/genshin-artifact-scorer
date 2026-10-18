@@ -1100,12 +1100,16 @@
 
   // ============ 价值评估（独立视图 + 弹窗共用渲染）============
 
-  /** 情况优先级：情况三（套装件替换散件）> 情况二（套装件替换）> 情况一（散件/自由件替换） */
+  /** 情况优先级：情况三（套装件替换散件）> 情况二（套装件替换）> 情况一（散件/自由件替换）> 情况零（首次装备）
+   *  情况零（2026-10-18）单列最低档：它不是「替换方式」，而是空部位的首次装备，混进情况一会让人误以为
+   *  该角色有现役件被替换。 */
   function caseRank(r) {
+    if (r.emptySlot) return 0;
     return r.isSetSwap ? 3 : (r.case === "套装替换" ? 2 : 1);
   }
   /** 情况类别短词（弹窗用，无「情况 X」编号） */
   function caseLabel(r) {
+    if (r.emptySlot) return "首次装备（该部位为空）";
     if (r.case === "套装替换") return "套装件替换";
     if (r.isSetSwap) return "套装件替换散件";
     return r.case === "自由件" ? "自由件替换" : "散件替换";
@@ -1119,6 +1123,10 @@
    */
   function stopLossDisplay(r) {
     const cur = fmt(r.currentScore);
+    // 首次装备（2026-10-18）：无现役件可追赶——「已满级 / 追平」两套解释都不适用，统一灰「—」
+    if (r.emptySlot) {
+      return { txt: "—", tip: "止损容错：该部位原为空（无现役件），不涉及追赶", cls: " none" };
+    }
     if (r.stopTolerance == null) {
       // 满级件（remaining === 0 ⟺ level ≥ 20）：无剩余强化次数 → 「已满级」，样式与「还可歪/不能歪」同款
       if (r.remaining === 0) {
@@ -1205,6 +1213,11 @@
 
     if (res.results.length === 0) {
       box.appendChild(el("div", "info", "可将其录入到对应部位后重新评估，或修改新圣遗物信息。"));
+    } else if (res.emptySlot) {
+      // 首次装备（2026-10-18）：空位没有现役件，必须说明「+X 词条」是绝对增量，不是替换差值
+      box.appendChild(el("div", "info",
+        "该部位尚无已穿戴件（首次装备），不涉及替换：「+X 词条」是这件装备后带来的绝对增量" +
+        (art.level >= C.MAX_LEVEL ? "，达成度对照条为角色当前 → 装备后。" : "（未满级时为强化满后的潜力上限）。")));
     }
 
     res.results.forEach(r => {
@@ -1302,15 +1315,19 @@
     const foot = el("div");
     const btnCancel = el("button", "btn", "放弃");
     btnCancel.addEventListener("click", () => { pendingArtifact = null; evalHidden.clear(); closeModal(); render(); });
-    // 仅满级圣遗物可替换；未满级只评估强化价值，不提供替换入口
-    const canReplace = pendingArtifact.level >= C.MAX_LEVEL;
+    const isEmptySlot = !!core.evaluateArtifact(pendingArtifact, role).emptySlot;
+    // 仅满级圣遗物可替换；未满级只评估强化价值，不提供替换入口。
+    // 例外（2026-10-18，用户拍板）：空部位**任意等级都可装备**——首次装备不是替换，
+    // 不存在「拿没强化的件顶掉现役好件」的风险；否则新建角色录 Lv.0 件时弹窗只有「放弃」，流程断死。
+    const canReplace = pendingArtifact.level >= C.MAX_LEVEL || isEmptySlot;
     if (!canReplace) {
       foot.appendChild(btnCancel);
     } else {
-      const btnReplace = el("button", "btn btn-primary", "确认替换");
+      const btnReplace = el("button", "btn btn-primary", isEmptySlot ? "装备到该部位" : "确认替换");
       btnReplace.addEventListener("click", () => {
         const res = core.evaluateArtifact(pendingArtifact, role);
         const setSwap = res.results.some(r => r.isSetSwap);
+        const slotName = C.SLOTS[pendingArtifact.slot].name;
         const doReplace = () => {
           const linkRes = applyReplace(role, pendingArtifact, setSwap);
           pendingArtifact = null;
@@ -1318,9 +1335,12 @@
           closeModal();
           render();
           const note = erLinkNote(linkRes);
-          feedback.toast(`已替换，「${role.name}」` + (note || ""), "success", 6000, { label: "撤销", fn: () => undoReplace(role.id, linkRes.undo) });
+          feedback.toast((isEmptySlot ? `已装备「${role.name}」的${slotName}` : `已替换，「${role.name}」`) +
+            (note || ""), "success", 6000, { label: "撤销", fn: () => undoReplace(role.id, linkRes.undo) });
         };
-        if (setSwap) {
+        if (isEmptySlot) {
+          doReplace();                    // 空位装备：不做「没有价值」二次确认（用户主动点的装备）
+        } else if (setSwap) {
           feedback.confirm({
             title: "确认替换",
             message: "该替换会使该部位变为套装件，角色将失去散件（散件部位将置空）。确定替换？",
@@ -1399,14 +1419,15 @@
     }
     wrap.appendChild(sum);
 
-    // 图例：颜色 = 使用方式（优先级 三 > 二 > 一）
+    // 图例：颜色 = 使用方式（优先级 三 > 二 > 一 > 零 首次装备）
     wrap.appendChild(el("div", "legend",
       `<span class="lg"><i class="sw s3"></i>套装件替换散件 · 最高优先</span>` +
       `<span class="lg"><i class="sw s2"></i>套装件替换</span>` +
-      `<span class="lg"><i class="sw s1"></i>散件 / 自由件替换</span>`));
+      `<span class="lg"><i class="sw s1"></i>散件 / 自由件替换</span>` +
+      `<span class="lg"><i class="sw s0"></i>首次装备（该部位为空）</span>`));
 
-    // 按情况分组（优先级：情况三 > 二 > 一），组内每角色一行紧凑显示
-    const groups = { 3: [], 2: [], 1: [] };
+    // 按情况分组（优先级：情况三 > 二 > 一 > 零），组内每角色一行紧凑显示
+    const groups = { 3: [], 2: [], 1: [], 0: [] };
     valuable.forEach(({ role, res }) => {
       res.results.filter(r => r.worthy).forEach(r => {
         groups[caseRank(r)].push({ role, r });
@@ -1417,7 +1438,7 @@
     // 同一种使用方式里提升越大的角色越靠前，跨组仍按情况三 > 二 > 一。
     // ⚠️ 不能改成按角色列表顺序/评分排序：曾按 roles 原序输出，用户看到「+0.10 在 +2.60 上面」判为回归。
     // diff 相同保持角色列表原序（Array.prototype.sort 稳定）。
-    [3, 2, 1].forEach(rank => {
+    [3, 2, 1, 0].forEach(rank => {
       const items = groups[rank].slice().sort((a, b) => b.r.diffToCurrent - a.r.diffToCurrent);
       if (!items.length) return;
       const groupBox = el("div", "eval-case case-" + rank);
@@ -1454,7 +1475,10 @@
           const name = C.MAIN_SHORT[st] || st;
           return `【旧】${name} ${valOf(oldEffSubs, st)}【新】${name} ${valOf(newEffSubs, st)}`;
         };
-        const effHtml = oldEffSubs.length
+        // 首次装备（2026-10-18）：该部位无现役件 → 「有效词条」列直接说明为空，不显示「无有效副词条」
+        const effHtml = r.emptySlot
+          ? '<span class="eff-none">该部位为空</span>'
+          : oldEffSubs.length
           ? shownEffSubs.map((s, i) =>
               (i ? '<span class="eff-sep"> · </span>' : "") +
               `<span class="eff-sub num" title="${esc(subTitleOf(s.stat))}">${esc(fmtSubVal(s))}</span>`
@@ -1469,7 +1493,9 @@
         const row = el("div", "eval-row eval-row-grid");
         row.innerHTML =
           `<span class="row-role" title="点击查看角色详情">${esc(role.name)}</span>` +
-          `<span class="row-diff ${diffCls}">${r.diffToCurrent >= 0 ? "+" : ""}${fmt(r.diffToCurrent)} 词条</span>` +
+          `<span class="row-diff ${diffCls}"${r.emptySlot
+            ? ' title="该部位为空：这是装备后的绝对增量（从 0 起算），不是与现役件的差值"'
+            : ""}>${r.diffToCurrent >= 0 ? "+" : ""}${fmt(r.diffToCurrent)} 词条</span>` +
           `<span class="row-tol${tol.cls}" title="${esc(tol.tip)}">${tol.txt}</span>` +
           `<span class="row-eff">${effHtml}</span>` +
           pctCompareHtml(r.curPercent, r.newPercent) +
@@ -1492,9 +1518,9 @@
           render();
         });
         actions.appendChild(btnHide);
-        // 仅满级圣遗物可替换（未满级无替换按钮，也不提示）
-        if (art.level >= C.MAX_LEVEL) {
-          const btn = el("button", "btn btn-primary btn-sm", "替换");
+        // 满级可替换；空部位（首次装备）任意等级都可装备（2026-10-18，与弹窗同口径）
+        if (art.level >= C.MAX_LEVEL || r.emptySlot) {
+          const btn = el("button", "btn btn-primary btn-sm", r.emptySlot ? "装备" : "替换");
           btn.addEventListener("click", () => {
             const slotName = C.SLOTS[art.slot].name;
             const doReplace = () => {
@@ -1502,10 +1528,17 @@
               pendingArtifact = null;
               evalHidden.clear();
               const note = erLinkNote(linkRes);
-              feedback.toast(`已替换到「${role.name}」的${slotName}` + (note ? `（${note}）` : ""), "success", 6000, { label: "撤销", fn: () => undoReplace(role.id, linkRes.undo) });
+              feedback.toast((r.emptySlot ? `已装备到「${role.name}」的${slotName}` : `已替换到「${role.name}」的${slotName}`) + (note ? `（${note}）` : ""), "success", 6000, { label: "撤销", fn: () => undoReplace(role.id, linkRes.undo) });
               render();
             };
-            if (r.isSetSwap) {
+            if (r.emptySlot) {
+              feedback.confirm({
+                title: "确认装备",
+                message: `确定将新圣遗物装备到「${role.name}」的${slotName}吗？`,
+                detail: "该部位原为空，本次为首次装备，不涉及替换。",
+                confirmText: "装备"
+              }).then(ok => { if (ok) doReplace(); });
+            } else if (r.isSetSwap) {
               feedback.confirm({
                 title: "确认替换",
                 message: `确定将新圣遗物替换到「${role.name}」的${slotName}吗？`,

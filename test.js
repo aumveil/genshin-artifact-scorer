@@ -300,7 +300,70 @@ console.log("== 残留权值键：weights 含 effectiveStats 之外的词条（2
   assert(!r.worthy && r.verdict === "不值得强化", "残留权值键（钟离实例）：判定「不值得强化」", r.verdict);
 }
 
-console.log("== 0 分换 0 分不判「值得强化」（2026-10-17 用户拍板）==");
+console.log("== 情况零：首次装备（空部位，2026-10-18 用户拍板）==");
+{
+  // 背景：新建角色 5 部位全空，逐件录入时前 5 次必然命中。旧实现因 equipped 前置条件
+  // 直接判「无适用场景」，未满级件在弹窗里连录入口都没有（只有「放弃」）。
+  // 现口径：无现役件 = 被替换件为「0 分件」，复用 evaluateAgainst(new, null)。
+  const mkRole = over => Object.assign({
+    id: "z0", name: "空角色",
+    sets: ["角斗士的终幕礼"], looseSlot: "goblet",
+    effectiveStats: ["暴击率", "暴击伤害"],
+    weights: { "暴击率": 1, "暴击伤害": 1 },
+    erRequirement: null, currentER: null,
+    artifacts: { flower: null, plume: null, sands: null, goblet: null, circlet: null }
+  }, over || {});
+  const art = (level, subs) => ({ slot: "flower", set: "角斗士的终幕礼", mainStat: "生命值", level, substats: subs });
+  const GOOD = [
+    { stat: "暴击率", value: 7.0, activated: true },    // 2 发
+    { stat: "暴击伤害", value: 21.0, activated: true }  // 3 发
+  ];
+  const DEAD = [
+    { stat: "攻击力", value: 19, activated: true }, { stat: "防御力", value: 23, activated: true },
+    { stat: "生命值百分比", value: 5.8, activated: true }, { stat: "元素精通", value: 23, activated: true }
+  ];
+
+  // 1. 满级件：从 0 起算，diff = 单件分
+  const e1 = core.evaluateArtifact(art(20, GOOD), mkRole());
+  assert(e1.results.length === 1, "空部位满级件：只产生 1 条结论（不进套装/散件判定）", e1.results.length);
+  const r1 = e1.results[0];
+  assert(r1.emptySlot === true && r1.case === "首次装备", "空部位满级件：case = 首次装备 + emptySlot", [r1.case, r1.emptySlot]);
+  assert(closeTo(r1.currentScore, 0, 1e-9), "空部位满级件：现役件分按 0 计", r1.currentScore);
+  assert(closeTo(r1.potentialScore, 4.4872), "空部位满级件：潜力 = 单件分 4.4872", r1.potentialScore);
+  assert(closeTo(r1.diffToCurrent, 4.4872), "空部位满级件：diff = 4.4872（绝对增量）", r1.diffToCurrent);
+  assert(r1.worthy === true && r1.verdict === "建议装备", "空部位满级件：建议装备", r1.verdict);
+  assert(e1.valuable === true && e1.summary === "有价值" && e1.emptySlot === true, "空部位满级件：汇总 有价值", e1.summary);
+
+  // 2. 未满级件：diff = 潜力（0 级 → 5 次强化全叠最高权值）
+  const e2 = core.evaluateArtifact(art(0, GOOD), mkRole());
+  const r2 = e2.results[0];
+  assert(closeTo(r2.potentialScore, 9.4872), "空部位 0 级件：潜力 9.4872（4.4872 + 5×1.0）", r2.potentialScore);
+  assert(r2.worthy === true && r2.verdict === "值得强化", "空部位 0 级件：值得强化", r2.verdict);
+
+  // 3. 全无效词条：能装但无价值（不因「空位」就无脑判有价值）
+  const e3 = core.evaluateArtifact(art(20, DEAD), mkRole());
+  assert(e3.valuable === false && e3.summary === "无价值", "空部位全无效词条：无价值", e3.summary);
+  assert(e3.results[0].worthy === false && e3.results[0].verdict === "不建议装备（无有效词条）",
+    "空部位全无效词条：不建议装备", e3.results[0].verdict);
+
+  // 4. 与套装 / 散件位配置无关（空位不看 sets / looseSlot）
+  const e4a = core.evaluateArtifact(art(20, GOOD), mkRole({ sets: [] }));
+  const e4b = core.evaluateArtifact(art(20, GOOD), mkRole({ sets: [], looseSlot: null }));
+  assert(closeTo(e4a.results[0].diffToCurrent, 4.4872) && closeTo(e4b.results[0].diffToCurrent, 4.4872),
+    "空部位：sets / looseSlot 留空时结论不变", [e4a.results[0].diffToCurrent, e4b.results[0].diffToCurrent]);
+
+  // 5. 防回潮：该部位**有**现役件时不得走首次装备分支
+  const roleFilled = mkRole({
+    artifacts: {
+      flower: { slot: "flower", set: "角斗士的终幕礼", mainStat: "生命值", level: 20, substats: [
+        { stat: "暴击率", value: 3.5, activated: true }] }
+    }
+  });
+  const e5 = core.evaluateArtifact(art(20, GOOD), roleFilled);
+  assert(e5.results.every(r => !r.emptySlot), "有现役件的部位：不产生「首次装备」结论", e5.results.map(r => r.case));
+}
+
+
 {
   // 该角色对两件都吃不到有效词条：现役件 0 分 → diff = 0，旧口径 `diff ≥ 0` 会误判「值得强化」，
   // 评估页出现「+0.00 词条 / 值得强化」。现口径 = diff ≥ 0 **且** potential > 0。

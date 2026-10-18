@@ -363,17 +363,43 @@
   }
 
   /**
-   * 主入口：评估新圣遗物的所有潜在使用方式（情况一/一′ 自由件/二/三 + 汇总）
+   * 主入口：评估新圣遗物的所有潜在使用方式（情况零 首次装备 / 一·一′ 自由件 / 二 / 三 + 汇总）
    * 2026-10-09 口径（角色套装字段固化后）：
    *  - 情况二/三 属「套装类结论」，需该角色**判套装**（`hasSetInfo`）才产生；
    *    留空（「其他」）或 5 部位未录全（当这个角色不存在）→ 只剩情况一/一′（纯词条 + looseSlot 判定）。
    *  - 情况一/一′ 判定依据是 `looseSlot` / `freeSlots`（部位级），与本字段无关，保持不变。
-   * @returns {Object} {valuable, summary, results:[{case,...evaluateAgainst 结果}]}
+   * 2026-10-18 新增「情况零：首次装备」（用户拍板，见实现方案 §8.36）：
+   *  - 该部位**尚无已穿戴件**时，情况一/一′/二的前提（`equipped` 存在）全不成立，旧实现直接判
+   *    「无适用场景」——新建角色逐件录入的**前 5 次必然命中**，且未满级件在弹窗里没有任何录入口。
+   *  - 现口径：无现役件 = 被替换件为「0 分件」，复用 evaluateAgainst(new, null) —— 数学上自洽
+   *    （curScore=0、diff=潜力、达成度 0%→替换后），不新增评价维度，也不预测套装（此时 5 部位未录全，
+   *    roleSets 本就返回空）。
+   *  - 该分支**优先于一切套装/散件判定**：空位装什么都不会破坏现有搭配，无需 looseSlot / sets。
+   * @returns {Object} {valuable, summary, emptySlot, results:[{case,...evaluateAgainst 结果}]}
    */
   function evaluateArtifact(newArtifact, role) {
     const results = [];
     const equipped = role.artifacts && role.artifacts[newArtifact.slot];
     const setInfo = hasSetInfo(role);   // 该角色是否判套装（套装类结论总开关）
+
+    if (!equipped) {
+      // 情况零：首次装备（该部位为空）——套装上下文此时尚未成立（5 部位未录全 → roleSets 返回空），
+      // 也不必判断：空位装任何件都不会破坏现有搭配，只看这件的词条价值。
+      const r = evaluateAgainst(newArtifact, null, role);
+      r.emptySlot = true;
+      r.case = "首次装备";
+      // verdict 覆写：evaluateAgainst 的「建议替换 / 不建议替换」在空位场景不成立
+      const full = newArtifact.level >= C.MAX_LEVEL;
+      r.verdict = r.worthy
+        ? (full ? "建议装备" : "值得强化")
+        : (full ? "不建议装备（无有效词条）" : "不值得强化");
+      results.push(r);
+      return {
+        valuable: r.worthy, emptySlot: true,
+        summary: r.worthy ? "有价值" : "无价值",
+        results
+      };
+    }
 
     // 情况二：作为套装件（同部位、该部位是套装件而非散件、同套装、同主词条）
     const isSetReplace = !!(setInfo && equipped && newArtifact.slot !== role.looseSlot

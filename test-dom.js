@@ -1126,7 +1126,106 @@ const path = require("path");
     App.store.deleteRole(rw.id);
   }
 
-  console.log("捕获错误:", window.__testErrors.length ? window.__testErrors : "无");
+  // ===== 情况零：空部位首次装备（2026-10-18 用户报障）=====
+  // 新建角色（套装 + 散件位已配置、5 部位全空）录第一件：旧实现恒「无适用场景」，
+  // 未满级件连录入口都没有（只有「放弃」）。现口径见实现方案 §8.36。
+  {
+    const zr = App.store.newRole("测试-空角色");
+    zr.sets = ["角斗士的终幕礼"];
+    zr.looseSlot = "goblet";
+    zr.effectiveStats = ["暴击率", "暴击伤害", "攻击力百分比", "元素精通"];
+    zr.weights = { "暴击率": 1, "暴击伤害": 1, "攻击力百分比": 0.5, "元素精通": 0.3 };
+    App.store.updateRole(zr);
+    const zLogo = window.document.getElementById("logoBtn");
+    if (zLogo) zLogo.click();          // 回到首页列表（此前的用例可能停在详情页 / 评估页）
+    await new Promise(r => setTimeout(r, 40));
+    App.ui.render();
+    await new Promise(r => setTimeout(r, 30));
+
+    const zCard = Array.from(app.querySelectorAll(".role-card"))
+      .find(c => { const n = c.querySelector(".rc-name"); return n && n.textContent === "测试-空角色"; });
+    if (!zCard) { console.log("空部位首次装备：找不到角色卡 ✗"); process.exitCode = 1; }
+    zCard.click();
+    await new Promise(r => setTimeout(r, 40));
+
+    // 点空的花位 → 录入 Lv.0
+    const emptyCards = App.store.getRole(zr.id) ? app.querySelectorAll(".artifact-card.empty-art") : [];
+    const emptyFlower = Array.from(emptyCards).find(c => c.textContent.includes("生之花"));
+    console.log("空部位：花位空卡可点击录入:", emptyFlower ? "✓" : "✗");
+    if (!emptyFlower) process.exitCode = 1;
+    emptyFlower.click();
+    await new Promise(r => setTimeout(r, 40));
+    window.document.querySelector(".artifact-text").value =
+      "生之花生命值4780+0 暴击率+7.0%·暴击伤害+20.2%·攻击力+9.9%·元素精通+40角斗士的终幕礼：(4)";
+    Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "识别").click();
+    await new Promise(r => setTimeout(r, 40));
+    Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "保存并评估").click();
+    await new Promise(r => setTimeout(r, 60));
+
+    const sumTxt = (window.document.querySelector("#modalRoot .eval-summary") || {}).textContent || "";
+    const caseTitle = (window.document.querySelector("#modalRoot .eval-case .c-title") || {}).textContent || "";
+    const tolTxt = (window.document.querySelector("#modalRoot .eval-case .row-tol") || {}).textContent || "";
+    const applyBtn = Array.from(window.document.querySelectorAll("#modalRoot button"))
+      .find(b => b.textContent === "装备到该部位");
+    const okSum = /有价值/.test(sumTxt);
+    const okCase = /首次装备/.test(caseTitle);
+    const okTol = /—/.test(tolTxt);
+    console.log("空部位弹窗：汇总/情况/止损:", okSum && okCase && okTol ? "✓" : "✗",
+      `(${sumTxt.trim()} | ${caseTitle} | 止损「${tolTxt}」)`);
+    if (!(okSum && okCase && okTol)) process.exitCode = 1;
+    console.log("空部位弹窗：未满级也有「装备到该部位」:", applyBtn ? "✓" : "✗");
+    if (!applyBtn) process.exitCode = 1;
+
+    // 点装备 → 落盘（Lv.0 也允许）
+    if (applyBtn) {
+      applyBtn.click();
+      await new Promise(r => setTimeout(r, 60));
+      const saved = App.store.getRole(zr.id).artifacts.flower;
+      const okSaved = !!saved && saved.level === 0 && saved.set === "角斗士的终幕礼";
+      const toastTxt = Array.from(window.document.querySelectorAll(".toast")).map(t => t.textContent).join("|");
+      console.log("空部位装备落盘（Lv.0）:", okSaved ? "✓" : "✗", `(${saved ? saved.set + " Lv." + saved.level : "无"} | toast ${toastTxt})`);
+      if (!okSaved) process.exitCode = 1;
+      // 撤销（R5 既有能力，空位撤销 = 恢复为空）
+      // ⚠️ 取**最后一个** toast：前面用例可能留下未过期的 toast，querySelector 会拿到旧的那个
+      const undoBtns = Array.from(window.document.querySelectorAll(".toast .toast-act"));
+      const undoBtn = undoBtns[undoBtns.length - 1];
+      if (undoBtn) undoBtn.click();
+      await new Promise(r => setTimeout(r, 60));
+      const okUndo = !App.store.getRole(zr.id).artifacts.flower;
+      console.log("空部位装备撤销:", okUndo ? "✓" : "✗");
+      if (!okUndo) process.exitCode = 1;
+    }
+
+    // 独立评估页：空位角色进「首次装备」组（case-0），图例第 4 项，按钮为「装备」
+    window.document.getElementById("btnEvaluate").click();
+    await new Promise(r => setTimeout(r, 40));
+    const btnAddE = Array.from(app.querySelectorAll("button")).find(b => b.textContent.includes("录入新圣遗物"));
+    if (btnAddE) {
+      btnAddE.click();
+      await new Promise(r => setTimeout(r, 40));
+      window.document.querySelector(".artifact-text").value =
+        "生之花生命值4780+20 暴击率+7.0%·暴击伤害+20.2%·攻击力+9.9%·元素精通+40角斗士的终幕礼：(4)";
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "识别").click();
+      await new Promise(r => setTimeout(r, 40));
+      Array.from(window.document.querySelectorAll("button")).find(b => b.textContent === "保存并评估").click();
+      await new Promise(r => setTimeout(r, 60));
+      const g0 = app.querySelector(".eval-case.case-0");
+      const legend = Array.from(app.querySelectorAll(".legend .lg")).map(x => x.textContent).join("|");
+      const row0 = g0 ? g0.querySelector(".eval-row-grid") : null;
+      const eff0 = row0 ? (row0.querySelector(".row-eff") || {}).textContent : "";
+      const btn0 = row0 ? Array.from(row0.querySelectorAll(".row-actions button")).map(b => b.textContent).join("/") : "";
+      const okGroup = !!g0 && !!row0 && /该部位为空/.test(eff0) && /装备/.test(btn0) && /首次装备/.test(legend);
+      console.log("独立评估页：首次装备组 / 该部位为空 / 装备按钮:", okGroup ? "✓" : "✗",
+        `(组 ${!!g0} | eff「${eff0}」 | 按钮「${btn0}」 | 图例 ${legend})`);
+      if (!okGroup) process.exitCode = 1;
+    } else {
+      console.log("独立评估页：缺录入入口 ✗");
+      process.exitCode = 1;
+    }
+    App.store.deleteRole(zr.id);
+  }
+
+
   if (window.__testErrors.length) process.exitCode = 1;
   // 退出码 = 累计断言结果。⚠️ 勿写死 process.exit(0)：那会把上面所有 exitCode = 1 全部吞掉，
   //    令 `node test-dom.js; echo $?` 永远为 0、CI/脚本无法感知失败（2026-10-09 修）。
