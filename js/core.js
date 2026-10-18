@@ -800,7 +800,7 @@
   global.App.core = {
     calcArtifactScore, calcPerfect, calcEnergyPenalty, calcCharacterScore, scoreComposition,
     erApplies,   // 充能是否适用（有效词条含「元素充能效率」）——UI 与算法共用同一判定（2026-10-17）
-    maxW, remaining, ERContrib, evaluateAgainst, evaluateArtifact, freeSlots,
+    maxW, E, remaining, ERContrib, evaluateAgainst, evaluateArtifact, freeSlots,
     expectedHits, calcRemodel, remodelSignature, inferInitialCount, collectRemodelCandidates, wearsSet, remodelTargets, analyzeRemodel,
     // 角色套装字段（2026-10-09）
     isFullyRecorded, roleSets, hasSetInfo, isSetPiece, deriveSetsFromArtifacts, sameSetComposition, checkSetConsistency,

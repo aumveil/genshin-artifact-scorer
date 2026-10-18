@@ -464,6 +464,20 @@ const path = require("path");
         effCell ? `(${effTxt} | ${effSubEls.map(el => el.getAttribute("title")).join(" ‖ ")})` : "（无单元格）");
       if (!okEff) process.exitCode = 1;
 
+      // 缺失有效副词条（2026-10-18 用户要求）：角色看重、现役件上没有的词条 → 接在已有词条之后、
+      // 只有名称无数值、弱化色（.eff-miss）。本用例：七七 eff = 暴击率/攻击%/充能，现役羽有效副条
+      // = 充能 18.1% + 攻击% 9.9% → 唯一缺失项是「暴击」（名称取 MAIN_SHORT）；新件带暴击率 5.8%。
+      const shortOf = st => (App.constants.MAIN_SHORT[st] || st);
+      const missEls = effCell ? Array.from(effCell.querySelectorAll(".eff-miss")) : [];
+      const missTxt = missEls.map(el => el.textContent).join("|");
+      const missTitle = missEls.map(el => el.getAttribute("title") || "").join(" ‖ ");
+      const okMiss = missEls.length === 1 && missTxt === shortOf("暴击率")
+        && missEls.every(el => !/\d/.test(el.textContent)
+          && /现役件没有/.test(el.getAttribute("title") || "")
+          && /新件 5\.8%/.test(el.getAttribute("title") || ""));
+      console.log("缺失有效副词条[无值·弱化·排末尾]:", okMiss ? "✓" : "✗", `(${missTxt || "无"} | ${missTitle})`);
+      if (!okMiss) process.exitCode = 1;
+
       // 达成度对照条（2026-10-17）：满级件 → [当前%][条][替换后%]（两数字 + 两段）；替换后有提升 → 右 > 左
       const pcts = rowQiqi.querySelector(".row-pcts");
       const pctCur = pcts ? pcts.querySelector(".row-pct-cur") : null;

@@ -1,6 +1,6 @@
 ﻿{
   "version": 1,
-  "exportedAt": "2026-10-18T06:21:48.221Z",
+  "exportedAt": "2026-10-18T12:20:49.824Z",
   "roles": [
     {
       "id": "id_mswcw289_1y6o9z",
@@ -1379,7 +1379,7 @@
         "元素充能效率": 1
       },
       "erRequirement": 180,
-      "currentER": 180,
+      "currentER": 191,
       "artifacts": {
         "flower": {
           "id": "id_mswcw287_f6d01n",
@@ -1498,37 +1498,39 @@
           ]
         },
         "circlet": {
-          "id": "id_mswcw289_yr0p4u",
           "slot": "circlet",
-          "set": "黄金剧团",
+          "set": "翠绿之影",
+          "setUnknown": false,
           "mainStat": "暴击率",
           "level": 20,
           "substats": [
             {
               "stat": "元素充能效率",
-              "value": 5.2,
+              "value": 16.2,
               "activated": true
             },
             {
-              "stat": "防御力百分比",
-              "value": 5.1,
-              "activated": true
-            },
-            {
-              "stat": "攻击力",
-              "value": 18,
+              "stat": "攻击力百分比",
+              "value": 9.9,
               "activated": true
             },
             {
               "stat": "暴击伤害",
-              "value": 32.7,
+              "value": 20.2,
+              "activated": true
+            },
+            {
+              "stat": "防御力",
+              "value": 16,
               "activated": true
             }
-          ]
+          ],
+          "raw": "理之冠·暴击率·31.1%·+20··元素充能效率+16.2%·攻击力+9.9%·暴击伤害+20.2%·防御力+16·翠绿之影：(1)",
+          "id": "id_mvdrihh5_um5lq1"
         }
       },
       "createdAt": 1786918084425,
-      "updatedAt": 1786922997132,
+      "updatedAt": 1792324240503,
       "element": "雷",
       "sets": [
         "长夜之誓"
@@ -7169,7 +7171,7 @@
       "currentER": 197.5,
       "artifacts": {
         "flower": {
-          "id": "id_mtxwa86k_qzy42p",
+          "id": "id_mvdqnncn_q43w7f",
           "slot": "flower",
           "set": "千岩牢固",
           "mainStat": "生命值",
@@ -7319,7 +7321,7 @@
         }
       },
       "createdAt": 1786918084425,
-      "updatedAt": 1792231398914,
+      "updatedAt": 1792322696183,
       "element": "冰",
       "sets": [
         "千岩牢固"
@@ -8538,10 +8540,10 @@
         "元素充能效率": 1
       },
       "erRequirement": 270,
-      "currentER": 268.1,
+      "currentER": 284.3,
       "artifacts": {
         "flower": {
-          "id": "id_mswcw288_fkdmxu",
+          "id": "id_mvdqmuoj_87kvl6",
           "slot": "flower",
           "set": "千岩牢固",
           "mainStat": "生命值",
@@ -8549,54 +8551,56 @@
           "substats": [
             {
               "stat": "防御力",
-              "value": 37,
+              "value": 19,
+              "activated": true
+            },
+            {
+              "stat": "元素充能效率",
+              "value": 12.3,
+              "activated": true
+            },
+            {
+              "stat": "防御力百分比",
+              "value": 10.2,
               "activated": true
             },
             {
               "stat": "暴击率",
               "value": 13.2,
               "activated": true
-            },
-            {
-              "stat": "暴击伤害",
-              "value": 7.8,
-              "activated": true
-            },
-            {
-              "stat": "攻击力",
-              "value": 14,
-              "activated": true
             }
           ]
         },
         "plume": {
-          "id": "id_mv6x3j54_64wceh",
           "slot": "plume",
           "set": "千岩牢固",
+          "setUnknown": false,
           "mainStat": "攻击力",
           "level": 20,
           "substats": [
             {
-              "stat": "防御力百分比",
-              "value": 6.6,
-              "activated": true
-            },
-            {
               "stat": "暴击率",
-              "value": 7,
+              "value": 6.2,
               "activated": true
             },
             {
               "stat": "元素精通",
-              "value": 47,
+              "value": 21,
               "activated": true
             },
             {
               "stat": "元素充能效率",
-              "value": 17.5,
+              "value": 21.4,
+              "activated": true
+            },
+            {
+              "stat": "生命值百分比",
+              "value": 4.1,
               "activated": true
             }
-          ]
+          ],
+          "raw": "死之羽·攻击力·311·+20··暴击率+6.2%·元素精通+21··元素充能效率+21.4%·生命值+4.1%千岩牢固：(4)·02件套·牛盒值提开20%",
+          "id": "id_mvdqschs_9onmq5"
         },
         "sands": {
           "id": "id_mswcw288_qvv8yb",
@@ -8687,7 +8691,7 @@
         }
       },
       "createdAt": 1786918084425,
-      "updatedAt": 1791910257520,
+      "updatedAt": 1792322940911,
       "element": "风",
       "sets": [
         "千岩牢固"
@@ -10057,9 +10061,9 @@
       "name": "梦见月瑞希",
       "looseSlot": "sands",
       "effectiveStats": [
-        "元素精通",
         "暴击率",
-        "暴击伤害"
+        "暴击伤害",
+        "元素精通"
       ],
       "weights": {
         "元素充能效率": 1,
@@ -10217,7 +10221,7 @@
         }
       },
       "createdAt": 1786918084425,
-      "updatedAt": 1792262313012,
+      "updatedAt": 1792324980435,
       "element": "风",
       "sets": [
         "血红之证"
@@ -11619,7 +11623,7 @@
         "元素充能效率": 1
       },
       "erRequirement": 217.8,
-      "currentER": 221,
+      "currentER": 221.7,
       "artifacts": {
         "flower": {
           "id": "id_mt57lhvn_tooihl",
@@ -11739,24 +11743,24 @@
         },
         "circlet": {
           "slot": "circlet",
-          "set": "风起之日",
+          "set": "千岩牢固",
           "setUnknown": false,
           "mainStat": "攻击力百分比",
           "level": 20,
           "substats": [
             {
-              "stat": "暴击伤害",
-              "value": 17.9,
+              "stat": "防御力",
+              "value": 19,
               "activated": true
             },
             {
               "stat": "元素充能效率",
-              "value": 23.3,
+              "value": 24,
               "activated": true
             },
             {
-              "stat": "生命值百分比",
-              "value": 5.3,
+              "stat": "元素精通",
+              "value": 42,
               "activated": true
             },
             {
@@ -11765,12 +11769,12 @@
               "activated": true
             }
           ],
-          "raw": "理之冠··攻击力·46.6%·+20··暴击伤害+17.9%元素充能效率+23.3%·生命值+5.3%·生命值+299·风起之日：（0)",
-          "id": "id_mvc7h97k_kxonge"
+          "raw": "理之冠·攻击力·46.6%·+20·防御力+19··元素充能效率+24.0%·元素精通+42·生命值+299·千岩牢固：(4)",
+          "id": "id_mvdsdhd8_9vb5vn"
         }
       },
       "createdAt": 1787453328087,
-      "updatedAt": 1792230267828,
+      "updatedAt": 1792325611357,
       "sets": [
         "天之美赐"
       ]
@@ -12079,37 +12083,39 @@
           ]
         },
         "circlet": {
-          "id": "id_mt57qyo9_ch5tzx",
           "slot": "circlet",
-          "set": "翠绿之影",
+          "set": "千岩牢固",
+          "setUnknown": false,
           "mainStat": "暴击率",
           "level": 20,
           "substats": [
             {
-              "stat": "元素充能效率",
-              "value": 16.2,
-              "activated": true
-            },
-            {
-              "stat": "攻击力百分比",
-              "value": 9.9,
+              "stat": "防御力",
+              "value": 60,
               "activated": true
             },
             {
               "stat": "暴击伤害",
-              "value": 20.2,
+              "value": 19.4,
               "activated": true
             },
             {
-              "stat": "防御力",
-              "value": 16,
+              "stat": "攻击力百分比",
+              "value": 11.7,
+              "activated": true
+            },
+            {
+              "stat": "生命值",
+              "value": 239,
               "activated": true
             }
-          ]
+          ],
+          "raw": "理之冠·暴击率·31.1%·+20·防御力+60·暴击伤害+19.4%·攻击力+11.7%··生命值+239·千岩牢固：(4)",
+          "id": "id_mvdrhgl7_g3d20b"
         }
       },
       "createdAt": 1787453556319,
-      "updatedAt": 1787453645486,
+      "updatedAt": 1792324133674,
       "sets": [
         "风起之日"
       ]
@@ -15737,35 +15743,6 @@
       ]
     },
     {
-      "id": "id_mv3chjel_hy6e64",
-      "slot": "goblet",
-      "set": "流浪大地的乐团",
-      "mainStat": "生命值百分比",
-      "level": 20,
-      "substats": [
-        {
-          "stat": "攻击力",
-          "value": 33,
-          "activated": true
-        },
-        {
-          "stat": "防御力",
-          "value": 37,
-          "activated": true
-        },
-        {
-          "stat": "暴击伤害",
-          "value": 13.2,
-          "activated": true
-        },
-        {
-          "stat": "暴击率",
-          "value": 11.3,
-          "activated": true
-        }
-      ]
-    },
-    {
       "id": "id_mv3chtfc_wal7o8",
       "slot": "goblet",
       "set": "流浪大地的乐团",
@@ -16225,35 +16202,6 @@
         {
           "stat": "攻击力",
           "value": 33,
-          "activated": true
-        }
-      ]
-    },
-    {
-      "id": "id_mv3coz6c_vnscs8",
-      "slot": "circlet",
-      "set": "被怜爱的少女",
-      "mainStat": "暴击率",
-      "level": 20,
-      "substats": [
-        {
-          "stat": "防御力百分比",
-          "value": 7.3,
-          "activated": true
-        },
-        {
-          "stat": "暴击伤害",
-          "value": 31.9,
-          "activated": true
-        },
-        {
-          "stat": "元素充能效率",
-          "value": 5.2,
-          "activated": true
-        },
-        {
-          "stat": "防御力",
-          "value": 23,
           "activated": true
         }
       ]
@@ -16731,6 +16679,68 @@
       ],
       "raw": "死之羽·攻击力·311·+20·元素精通+23·生命值+19.2%··元素充能效率+5.8%·攻击力+9.9%千岩牢固：(4)",
       "id": "id_mvc86jt8_ye2ujs"
+    },
+    {
+      "slot": "goblet",
+      "set": "千岩牢固",
+      "setUnknown": false,
+      "mainStat": "生命值百分比",
+      "level": 20,
+      "substats": [
+        {
+          "stat": "元素精通",
+          "value": 16,
+          "activated": true
+        },
+        {
+          "stat": "暴击伤害",
+          "value": 19.4,
+          "activated": true
+        },
+        {
+          "stat": "暴击率",
+          "value": 10.9,
+          "activated": true
+        },
+        {
+          "stat": "攻击力百分比",
+          "value": 4.1,
+          "activated": true
+        }
+      ],
+      "raw": "空之杯··生命值·46.6%·+20·元素精通+16·暴击伤害+19.4%·暴击率+10.9%··攻击力+4.1%·千岩牢固：(4)·02件套·午品值提升20%",
+      "id": "id_mvdqxgot_xte8ns"
+    },
+    {
+      "slot": "circlet",
+      "set": "黄金剧团",
+      "setUnknown": false,
+      "mainStat": "暴击率",
+      "level": 20,
+      "substats": [
+        {
+          "stat": "元素充能效率",
+          "value": 5.2,
+          "activated": true
+        },
+        {
+          "stat": "防御力百分比",
+          "value": 5.1,
+          "activated": true
+        },
+        {
+          "stat": "攻击力",
+          "value": 18,
+          "activated": true
+        },
+        {
+          "stat": "暴击伤害",
+          "value": 32.7,
+          "activated": true
+        }
+      ],
+      "raw": "理之冠·暴击率·31.1%·+20··元素充能效率+5.2%·防御力+5.1%·攻击力+18·暴击伤害+32.7%黄金剧团：(1)",
+      "id": "id_mvdrkrtm_caws0v"
     }
   ]
 }

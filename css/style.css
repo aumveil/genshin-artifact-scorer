@@ -1126,6 +1126,8 @@ body { background: var(--bg-0); }
 .eval-row .row-eff { color: var(--text-1); font-variant-numeric: tabular-nums; }
 .eval-row .row-eff .eff-sub { cursor: help; }   /* 逐词条悬停提示：光标给出手感 */
 .eval-row .row-eff .eff-sep { color: var(--text-3); }
+/* 缺失的有效副词条（2026-10-18）：角色看重、现役件上没有——无值 + 三级文字色（弱化），排在已有词条之后 */
+.eval-row .row-eff .eff-miss { color: var(--text-3); cursor: help; }
 .eval-row .row-eff .eff-more { color: var(--text-3); margin-left: 4px; cursor: help; }
 .eval-row .row-eff .eff-none { color: var(--text-3); font-style: italic; }
 .eval-row .btn { margin-left: auto; }

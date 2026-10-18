@@ -1389,7 +1389,8 @@
     wrap.appendChild(head);
     wrap.appendChild(el("div", "info page-info",
       "录入一件新圣遗物后，将自动对全部角色评估，按使用方式优先级列出所有「有提升」的情况。" +
-      "「有效词条」列显示角色当前所穿那件上的有效副词条实测值，悬停可看「现役件 → 新件」逐条对照。"));
+      "「有效词条」列显示角色当前所穿那件上的有效副词条实测值，其后灰色无值的词条是角色看重、但该件上没有的；" +
+      "悬停可看「现役件 → 新件」逐条对照。"));
 
     if (!pendingArtifact) return wrap;   // 空态：仅标题 + 说明 + 右上角录入入口（R13 删除引导卡）
 
@@ -1459,6 +1460,16 @@
           .sort((a, b) => ((role.weights || {})[b.stat] || 0) - ((role.weights || {})[a.stat] || 0)
             || subRank(a.stat) - subRank(b.stat));
         const newEffSubs = pickEff(art.substats);
+        // 缺失的有效副词条（2026-10-18 用户要求）：角色看重、但这件现役件上**根本没有**的词条，
+        // 接在已有词条之后、**不带数值**、弱化色（`.eff-miss`）——一眼看清「这件旧件缺什么」。
+        // 口径 = core.E(slot, role)（= effectiveStats − 现役件主词条）：副词条不可能与主词条重复，
+        // 不排除的话攻击沙会同时出现「主词条攻击%」与「缺失副词条攻击%」这种自相矛盾的组合。
+        // 排序与已有词条一致：权值降序 → SUB_STATS 固定序（重点词条靠前）。
+        const oldEffSet = new Set(oldEffSubs.map(s => s.stat));
+        const missEff = core.E(art.slot, role)
+          .filter(st => !oldEffSet.has(st))
+          .sort((a, b) => ((role.weights || {})[b] || 0) - ((role.weights || {})[a] || 0)
+            || subRank(a) - subRank(b));
         // 列宽（2026-10-17 第三版）：未满级 **334px** / 满级 **280px**（操作列 auto 让出的空间），字号 13px
         // —— 4 项最宽 290px（瓦雷莎·花）：未满级全放得下，满级仅瓦雷莎/芙宁娜 2 例裁 3~10px（title 兜底）。
         // 折叠逻辑仅作防御保留（副词条上限 4 条，正常不会触发）。
@@ -1475,18 +1486,28 @@
           const name = C.MAIN_SHORT[st] || st;
           return `【旧】${name} ${valOf(oldEffSubs, st)}【新】${name} ${valOf(newEffSubs, st)}`;
         };
+        // 缺失项的悬停：旧侧就是「没有」，新件有值才给具体值（列内不显示数值，见用户要求）
+        const missTitleOf = st => {
+          const name = C.MAIN_SHORT[st] || st;
+          const nv = valOf(newEffSubs, st);
+          return `${name}：现役件没有 · 新件${nv === "0" ? "也没有" : " " + nv}`;
+        };
+        const missHtml = missEff.map(st =>
+          `<span class="eff-sep"> · </span><span class="eff-miss" title="${esc(missTitleOf(st))}">${esc(C.MAIN_SHORT[st] || st)}</span>`
+        ).join("");
         // 首次装备（2026-10-18）：该部位无现役件 → 「有效词条」列直接说明为空，不显示「无有效副词条」
         const effHtml = r.emptySlot
           ? '<span class="eff-none">该部位为空</span>'
-          : oldEffSubs.length
-          ? shownEffSubs.map((s, i) =>
-              (i ? '<span class="eff-sep"> · </span>' : "") +
-              `<span class="eff-sub num" title="${esc(subTitleOf(s.stat))}">${esc(fmtSubVal(s))}</span>`
-            ).join("") +
-            (restEffSubs.length
-              ? `<span class="eff-more" title="${esc(restEffSubs.map(s => subTitleOf(s.stat)).join(" · "))}">+${restEffSubs.length}</span>`
-              : "")
-          : '<span class="eff-none">无有效副词条</span>';
+          : (oldEffSubs.length
+              ? shownEffSubs.map((s, i) =>
+                  (i ? '<span class="eff-sep"> · </span>' : "") +
+                  `<span class="eff-sub num" title="${esc(subTitleOf(s.stat))}">${esc(fmtSubVal(s))}</span>`
+                ).join("") +
+                (restEffSubs.length
+                  ? `<span class="eff-more" title="${esc(restEffSubs.map(s => subTitleOf(s.stat)).join(" · "))}">+${restEffSubs.length}</span>`
+                  : "")
+              : '<span class="eff-none">无有效副词条</span>') +
+            missHtml;
         // grid 固定列（eval-row-grid）：角色名 | 词条差 | 止损容错 | 有效词条 | 达成度对照条 | 状态标签 | 操作按钮
         // 条件列（对照条/状态标签）以空占位，保证所有行各列起始位置一致（纵向对齐）
         const tol = stopLossDisplay(r);   // 止损容错（2026-10-17）：追平口径四态（与藏品 coll-tol 同语言；满级「已满级」见 8.30）
