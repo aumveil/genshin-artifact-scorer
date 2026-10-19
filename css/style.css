@@ -998,12 +998,14 @@ body { background: var(--bg-0); }
   color: var(--yellow-ink); padding: 9px 13px; border-radius: var(--r-sm);
   font-size: var(--fs-md); margin-bottom: 12px; line-height: 1.6;
 }
-/* 套装字段与实况不一致提示条（详情页）：文案 + 右侧「按实况更新」按钮 */
-.warn.set-mismatch {
+/* 套装字段 / 散件位与实况不一致提示条（详情页）：文案 + 右侧修正按钮 */
+.warn.set-mismatch,
+.warn.loose-mismatch {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap;
 }
-.warn.set-mismatch .btn { flex: 0 0 auto; }
+.warn.set-mismatch .btn,
+.warn.loose-mismatch .btn { flex: 0 0 auto; }
 .err-box {
   background: color-mix(in srgb, var(--red) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--red) 38%, transparent);

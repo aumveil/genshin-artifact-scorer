@@ -626,6 +626,46 @@
       wrap.appendChild(warn);
     }
 
+    // 散件位 vs 圣遗物实况不一致 → 黄字警告 + 一键修正（2026-10-20，方案 A：只读检测，不自动同步）
+    // 背景：looseSlot 不随换件更新，「原散件在杯 → 换件后实际在沙」会静默错位；后果是
+    // freeSlots 恒取旧位（真散件位漏评 / 真套装位被当散件误评 / 情况二被压掉 / 算法四方向判反）。
+    const lsCons = core.checkLooseSlot(role);
+    if (lsCons.checked && lsCons.state !== "ok") {
+      const slotNm = k => (C.SLOTS[k] ? C.SLOTS[k].name : k);
+      const actTxt = lsCons.actual.map(k => `「${slotNm(k)}」${esc(role.artifacts[k].set)}`).join("、");
+      let msg;
+      if (lsCons.state === "stale") {
+        msg = `散件位与圣遗物实况不一致：设定为「${slotNm(lsCons.loose)}」，但该部位穿的是「${esc(role.artifacts[lsCons.loose].set)}」（套装件）；实际异套件在${actTxt}。`;
+      } else if (lsCons.state === "extra") {
+        msg = `散件位与圣遗物实况不一致：当前 5 件全为套装，散件位仍设为「${slotNm(lsCons.loose)}」。`;
+      } else if (lsCons.state === "missing") {
+        msg = `未设散件位，但实际异套件在${actTxt}。`;
+      } else {
+        msg = `散件位无法自动判定：存在 ${lsCons.actual.length} 件异套件（${lsCons.actual.map(slotNm).join("、")}），当前设定为「${slotNm(lsCons.loose)}」。`;
+      }
+      const warn = el("div", "warn loose-mismatch");
+      warn.innerHTML = `<span>${ico("warn")}${msg}</span>`;
+      const writeLoose = (val, tip) => {
+        role.looseSlot = val;
+        const r = store.updateRole(role);
+        if (r && r.error) { feedback.toast(r.error, "error"); return; }
+        feedback.toast(tip, "success");
+        render();
+      };
+      if (lsCons.state === "stale" || lsCons.state === "missing") {
+        const btn = el("button", "btn btn-sm", `改为${slotNm(lsCons.actual[0])}`);
+        btn.title = "把散件位写入实际异套件所在部位";
+        btn.addEventListener("click", () => writeLoose(lsCons.actual[0], `散件位已改为${slotNm(lsCons.actual[0])}`));
+        warn.appendChild(btn);
+      } else if (lsCons.state === "extra") {
+        const btn = el("button", "btn btn-sm", "清空散件位");
+        btn.title = "5 件全为套装，清空散件位";
+        btn.addEventListener("click", () => writeLoose(null, "散件位已清空"));
+        warn.appendChild(btn);
+      }
+      wrap.appendChild(warn);
+    }
+
     // 5 部位卡
     const grid = el("div", "artifact-grid");
     C.SLOT_KEYS.forEach(slot => {

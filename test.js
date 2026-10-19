@@ -1859,5 +1859,42 @@ console.log("== scoreComposition（R2 分数构成）==");
   assert(core.scoreComposition({ effectiveStats: [], weights: {}, artifacts: {} }).length === 0, "空角色 → 空数组");
 }
 
+console.log("== checkLooseSlot（散件位 vs 实况，2026-10-20 方案 A）==");
+{
+  const MAIN = { flower: "生命值", plume: "攻击力", sands: "攻击力百分比", goblet: "攻击力百分比", circlet: "暴击率" };
+  // order = 按 SLOT_KEYS 顺序（花 / 羽 / 沙 / 杯 / 冠）的套装名
+  const mk = (sets, looseSlot, order) => {
+    const artifacts = {};
+    C.SLOT_KEYS.forEach((k, i) => { artifacts[k] = { slot: k, set: order[i], mainStat: MAIN[k], level: 20, substats: [] }; });
+    return { name: "t", sets, looseSlot, effectiveStats: [], weights: {}, artifacts };
+  };
+  const A = "套装A", B = "套装B", Cc = "套装C";
+  let r = core.checkLooseSlot(mk([A], "goblet", [A, A, A, B, A]));
+  assert(r.checked && r.state === "ok" && r.actual.length === 1 && r.actual[0] === "goblet",
+    "4+1 设定命中唯一异套件 → ok", JSON.stringify(r));
+  r = core.checkLooseSlot(mk([A], "goblet", [A, A, B, A, A]));
+  assert(r.state === "stale" && r.loose === "goblet" && r.actual[0] === "sands" && r.fixed === "sands",
+    "4+1 散件移位（实际在沙、设定仍为杯）→ stale，修正值=sands", JSON.stringify(r));
+  r = core.checkLooseSlot(mk([A], "goblet", [A, A, A, A, A]));
+  assert(r.state === "extra" && r.actual.length === 0 && r.fixed === null,
+    "5 件全套装仍留着散件位 → extra（应清空）", JSON.stringify(r));
+  r = core.checkLooseSlot(mk([A], null, [A, A, A, A, A]));
+  assert(r.state === "ok", "5 件全套装且未设散件位 → ok", JSON.stringify(r));
+  r = core.checkLooseSlot(mk([A], "", [A, A, A, B, A]));
+  assert(r.state === "missing" && r.fixed === "goblet" && r.loose === null,
+    "空串 looseSlot 视为未设 → missing（修正值=goblet）", JSON.stringify(r));
+  r = core.checkLooseSlot(mk([A], "goblet", [A, A, B, Cc, A]));
+  assert(r.state === "ambiguous" && r.actual.length === 2 && r.fixed === null,
+    "两件异套件 → ambiguous（不给一键修正）", JSON.stringify(r));
+  r = core.checkLooseSlot(mk([A, B], "circlet", [A, A, B, B, Cc]));
+  assert(r.state === "ok" && r.actual[0] === "circlet", "2+2+1 散件在冠 → ok", JSON.stringify(r));
+  const part = mk([A], "goblet", [A, A, A, B, A]);
+  delete part.artifacts.goblet;
+  assert(core.checkLooseSlot(part).checked === false, "5 部位未录全 → 不检测");
+  assert(core.checkLooseSlot(mk([], "goblet", [A, A, B, A, A])).checked === false, "「其他」（sets 空）→ 不检测");
+  r = core.checkLooseSlot(mk([A], "goblet", [A, B, Cc, A, A]));
+  assert(r.actual.join(",") === "plume,sands", "actual 按 SLOT_KEYS 顺序", r.actual.join(","));
+}
+
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
 process.exit(fail > 0 ? 1 : 0);

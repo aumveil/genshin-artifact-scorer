@@ -688,6 +688,40 @@
     return { checked: true, mismatch: !sameSetComposition(declared, actual), actual };
   }
 
+  /**
+   * 散件位一致性检测（2026-10-20，方案 A：只读检测 + 一键修正，**绝不自动改数据**）。
+   * 背景：`looseSlot` 是角色级静态字段，换件不会自动跟随——写 `artifacts` 的两条路径里，
+   *   「编辑已穿戴件」完全不碰它，评估→替换也只在 `isSetSwap`（散件位上装了套装件）时清空。
+   *   于是「原散件在杯 → 换件后实际散件在沙，looseSlot 仍是杯」会静默错位，算法侧后果：
+   *   `freeSlots` 恒取旧位 → 真散件位漏评、真套装位被当散件误评、情况二被 `slot !== looseSlot` 压掉、
+   *   算法四 transfer/promote 判反。
+   * 口径与 `checkSetConsistency` 完全对齐：仅「5 部位录全 且 套装字段非空」时检测；
+   *   未录全（当这个角色不存在）与留空（「其他」，无散件定义）→ `checked=false`，UI 不提示。
+   * state：
+   *   ok        无散件且未设位 / 恰 1 件异套且设定命中它
+   *   stale     looseSlot 有值，但该部位是套装件，真正唯一的异套件在别处（应改）
+   *   extra     0 件异套（5 件全为套装），looseSlot 仍有值（应清空）
+   *   missing   恰 1 件异套件，但 looseSlot 为空（应补设）
+   *   ambiguous ≥2 件异套件，无法自动判定（不给一键修正）
+   * @returns {{checked:boolean, state:string, loose:string|null, actual:string[], fixed:string|null}}
+   *   actual = 异套件所在部位（SLOT_KEYS 顺序）；fixed = 可一键写入的 looseSlot 值（null = 清空）
+   */
+  function checkLooseSlot(role) {
+    const declared = roleSets(role);
+    if (!declared.length) return { checked: false, state: "ok", loose: null, actual: [], fixed: null };
+    const arts = role.artifacts || {};
+    const loose = hasLooseSlot(role) ? role.looseSlot : null;
+    const actual = C.SLOT_KEYS.filter(k => !declared.includes(arts[k].set));
+    if (actual.length === 0) {
+      return { checked: true, state: loose ? "extra" : "ok", loose, actual, fixed: null };
+    }
+    if (actual.length === 1) {
+      if (loose === actual[0]) return { checked: true, state: "ok", loose, actual, fixed: null };
+      return { checked: true, state: loose ? "stale" : "missing", loose, actual, fixed: actual[0] };
+    }
+    return { checked: true, state: "ambiguous", loose, actual, fixed: null };
+  }
+
   // ============ 藏品（未装备圣遗物，2026-10-11）============
   // 详见《圣遗物网页实现方案.md》§七「藏品库」。桶 = 部位+主词条；维度 6 个；位 = 桶 × 维度（一件可占多位）。
   /** 某条副词条的累计值（含待激活词条；同一词条仅 1 条，累加为防御式处理） */
@@ -804,6 +838,7 @@
     expectedHits, calcRemodel, remodelSignature, inferInitialCount, collectRemodelCandidates, wearsSet, remodelTargets, analyzeRemodel,
     // 角色套装字段（2026-10-09）
     isFullyRecorded, roleSets, hasSetInfo, isSetPiece, deriveSetsFromArtifacts, sameSetComposition, checkSetConsistency,
+    checkLooseSlot,   // 散件位 vs 实况一致性（2026-10-20，方案 A 只读检测）
     // 藏品（2026-10-11）
     statValue, dimValue, dimFull, collectionBucketOf, collectionIndex, analyzeCollection
   };
