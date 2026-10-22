@@ -613,7 +613,7 @@ body { background: var(--bg-0); }
 :root { --cm-cell: 14px; --cm-gap: 3px; --cm-head: 17px; }
 .coll-matrix { background: var(--bg-1); border-radius: var(--r-lg); padding: 14px 16px 12px; }
 .cm-title { font-size: var(--fs-sm); color: var(--text-3); margin-bottom: 10px; }
-.cm-body { display: flex; gap: 10px; align-items: flex-start; justify-content: center; overflow-x: auto; }
+.cm-body { display: flex; gap: 10px; align-items: flex-start; justify-content: center; overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; }   /* 10-22：只留横向兜底；不写 overflow-y 会被规范算成 auto，配上 .cm-labels 的 1px 亚像素溢出就长出 15px 幽灵竖条（只能滚 1px）。padding-bottom 4 = 悬停 outline 外扩 3px + 1px 亚像素余量，否则最下行 hover 环底边被裁 */
 .cm-labels { display: grid; grid-auto-rows: var(--cm-cell); gap: var(--cm-gap); flex: none; padding-top: calc(var(--cm-head) + var(--cm-gap)); }   /* R13：让出列头行，与格阵对齐 */
 .cm-group-head { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; font-size: var(--fs-sm); color: var(--text-3); line-height: 1; }
 .cm-labels span { font-size: var(--fs-sm); color: var(--text-3); display: flex; align-items: center; line-height: 1; white-space: nowrap; }
