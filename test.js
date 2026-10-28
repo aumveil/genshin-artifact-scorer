@@ -1426,6 +1426,58 @@ console.log("== storage 筛选状态持久化（刷新/重开恢复）==");
   assert(storage.loadFilter() === null, "损坏 JSON → loadFilter 返回 null");
 }
 
+console.log("== storage.load 损坏数据隔离（2026-10-25 P0）==");
+{
+  const storage = global.App.storage;
+  const KEY = storage.KEY;
+  // ① 非法 JSON
+  global.localStorage.clear();
+  const bad = "{bad json";
+  global.localStorage.setItem(KEY, bad);
+  const s1 = storage.load();
+  assert(Array.isArray(s1.roles) && s1.roles.length === 0, "非法 JSON → 空 store（不抛错）");
+  assert(storage.getCorruptRaw() === bad, "原始串已隔离到 CORRUPT_KEY", storage.CORRUPT_KEY);
+  const st1 = storage.corruptState();
+  assert(st1 && st1.saved === true && st1.size === bad.length, "corruptState 记录大小与隔离成功", JSON.stringify(st1));
+  assert(global.localStorage.getItem(KEY) === bad, "原 key 未被清空（留给用户恢复）");
+
+  // ② 合法 JSON 但缺 roles（结构损坏）——migrate 会静默归零，必须同样隔离
+  global.localStorage.clear();
+  const badShape = JSON.stringify({ version: 1, customSets: [] });
+  global.localStorage.setItem(KEY, badShape);
+  storage.load();
+  assert(storage.getCorruptRaw() === badShape, "缺 roles → 同样隔离（不再静默归零）");
+
+  // ③ 正常数据不触发隔离
+  global.localStorage.clear();
+  global.localStorage.setItem(KEY, JSON.stringify({ version: 1, roles: [], customSets: [] }));
+  const okStore = storage.load();
+  assert(storage.corruptState() === null && okStore.roles.length === 0, "正常数据不触发隔离");
+  global.localStorage.clear();
+}
+
+console.log("== sanitizeStore 字段兜底（2026-10-29，§8.44）==");
+{
+  const storage = global.App.storage;
+  const dirty = {
+    roles: [
+      null,
+      "不是对象",
+      { id: "r1", name: "缺字段", effectiveStats: null, weights: [], artifacts: null },
+      { id: "r2", name: "缺键", artifacts: { flower: { slot: "flower", set: "X", mainStat: "生命值", note: "旧备注" } } }
+    ]
+  };
+  const s = storage.sanitizeStore(dirty);
+  assert(s.roles.length === 2, "剔除 null / 非对象角色", s.roles.length);
+  const r1 = s.roles.find(r => r.id === "r1");
+  assert(Array.isArray(r1.effectiveStats) && r1.effectiveStats.length === 0, "effectiveStats 类型错误 → 空数组");
+  assert(r1.weights && typeof r1.weights === "object" && !Array.isArray(r1.weights), "weights 类型错误 → 空对象");
+  assert(r1.artifacts && C.SLOT_KEYS.every(k => r1.artifacts[k] === null), "artifacts 缺失 → 5 部位补 null", JSON.stringify(r1.artifacts));
+  const r2 = s.roles.find(r => r.id === "r2");
+  assert(C.SLOT_KEYS.every(k => k in r2.artifacts), "artifacts 缺键 → 补齐 null", Object.keys(r2.artifacts).join(","));
+  assert(r2.artifacts.flower.note === undefined, "补齐时仍剥离废弃字段");
+}
+
 console.log("== store.replaceArtifact 充能联动（2026-09-29）==");
 {
   if (typeof global.alert === "undefined") global.alert = () => {};   // Node 无 alert
@@ -1477,6 +1529,50 @@ console.log("== store.replaceArtifact 充能联动（2026-09-29）==");
   assert(resMain && resMain.mainStatChanged === true && resMain.erMainStatTouched === true,
     "主词条变更且涉及充能 → erMainStatTouched = true", JSON.stringify(resMain));
   assert(closeTo(roleSands.currentER, 180, 1e-6), "主词条充能不自动联动（面板保持 180，待用户手动核对）", roleSands.currentER);
+}
+
+console.log("== store.newRole / updateRole 重名保护（2026-10-25 P0）==");
+{
+  if (typeof global.alert === "undefined") global.alert = () => {};
+  require("./js/store.js");
+  const S = global.App.store;
+  const a = S.newRole("测试-重名");
+  assert(a && a.id, "首次创建成功");
+  const b = S.newRole("  测试-重名  ");
+  assert(b && b.error && !b.id, "重名（含首尾空格）→ 拒绝并返回 error", JSON.stringify(b));
+  assert(S.getRoles().filter(r => String(r.name).trim() === "测试-重名").length === 1, "角色数未增加");
+
+  const c = S.newRole("  测试-改名  ");
+  assert(c.name === "测试-改名", "创建时 trim 名称", c.name);
+  c.name = "  测试-重名 ";
+  const ur1 = S.updateRole(c);
+  assert(ur1 && ur1.error, "updateRole 重名（含空格）→ 拒绝", JSON.stringify(ur1));
+  c.name = "  测试-改名2  ";
+  assert(S.updateRole(c) === true, "updateRole 保存成功");
+  assert(S.getRole(c.id).name === "测试-改名2", "updateRole 落库前 trim", S.getRole(c.id).name);
+  S.deleteRole(a.id); S.deleteRole(c.id);
+}
+
+console.log("== store.restoreRole 删除撤销（2026-10-29）==");
+{
+  const S = global.App.store;
+  const a = S.newRole("撤销-甲");
+  const b = S.newRole("撤销-乙");
+  const idx = S.getRoles().indexOf(b);
+  const snap = JSON.parse(JSON.stringify(b));
+  assert(S.deleteRole(b.id) === true, "删除成功");
+  assert(!S.getRole(b.id), "删除后查不到");
+  assert(S.restoreRole(snap, idx) === true, "撤销恢复成功");
+  const back = S.getRole(b.id);
+  assert(back && back.name === "撤销-乙", "恢复后字段完整", back && back.name);
+  assert(S.getRoles().indexOf(back) === idx, "恢复回原位置", `${S.getRoles().indexOf(back)} vs ${idx}`);
+  assert(S.restoreRole(snap, idx) === false, "重复撤销 → false（不覆盖现有数据）");
+  const c = S.newRole("撤销-丙");
+  const snapC = JSON.parse(JSON.stringify(c));
+  S.deleteRole(c.id);
+  assert(S.restoreRole(snapC, 9999) === true && S.getRoles().indexOf(S.getRole(c.id)) === S.getRoles().length - 1,
+    "越界索引 → 追加到末尾");
+  S.deleteRole(a.id); S.deleteRole(b.id); S.deleteRole(c.id);
 }
 
 console.log("== 角色套装字段（2026-10-09 固化：sets / roleSets / 一致性检测 / 预算）==");
@@ -1830,6 +1926,125 @@ console.log("\n== 藏品库（2026-10-11）==");
   const mgNoColl = io.mergeStore({ roles: [], customSets: ["A"] }, inc, "merge");
   assert(Array.isArray(mgNoColl.collection) && mgNoColl.collection.length === 0,
     "mergeStore(merge)：current 无 collection 时补空数组");
+}
+
+console.log("== 藏品一位一件：同值保留先入 + 入库拦截（2026-10-29）==");
+{
+  const S = global.App.store;
+  S.getCollection().slice().forEach(a => S.removeCollectionItem(a.id));
+  const mkArt = (id, subs) => ({ id, slot: "circlet", set: "S", mainStat: "暴击率", level: 20,
+    substats: subs.map(([stat, value]) => ({ stat, value, activated: true })) });
+
+  const a = mkArt("t1", [["暴击率", 7.8], ["暴击伤害", 21.8]]);      // 双爆 37.4
+  const a2 = JSON.parse(JSON.stringify(a)); a2.id = "t2";             // 完全同值
+  const worse = mkArt("t3", [["暴击率", 3.5], ["暴击伤害", 7.0]]);    // 双爆 14
+  const better = mkArt("t4", [["暴击率", 10.5], ["暴击伤害", 28.0]]); // 双爆 49
+
+  assert(S.addCollectionItem(a).ok === true, "首件入藏");
+  const tieRes = S.addCollectionItem(a2);
+  assert(tieRes.ok === false && tieRes.reason === "tie", "同值件 → 不入藏（tie）", JSON.stringify(tieRes));
+  assert(S.getCollection().length === 1 && S.getCollection()[0].id === "t1", "并列不替换先入者");
+  const worseRes = S.addCollectionItem(worse);
+  assert(worseRes.ok === false && worseRes.reason === "worse", "全维度更差 → 不入藏（worse）", JSON.stringify(worseRes));
+  assert(S.addCollectionItem(better).ok === true, "严格更高 → 入藏");
+  const idx = core.collectionIndex(S.getCollection());
+  const holderIds = Array.from(idx.holders.values()).map(h => h.arts[0].id);
+  assert(holderIds.includes("t4") && !holderIds.includes("t1"), "新件顶替旧持有者（一位一件）", holderIds.join(","));
+  assert(Array.from(idx.holders.values()).every(h => h.arts.length === 1), "每个位只有一个持有者");
+
+  // 更新：把持有者改成更差（另有一件同值时更高）→ 拒绝并保留旧值
+  const t5 = mkArt("t5", [["暴击率", 10.5], ["暴击伤害", 28.0]]);   // 与 t4 同值
+  S.getCollection().push(t5);                                      // 直接造对照件（绕过入库拦截）
+  const cur = JSON.parse(JSON.stringify(S.getCollection().find(x => x.id === "t4")));
+  cur.substats = [{ stat: "暴击率", value: 3.5, activated: true }, { stat: "暴击伤害", value: 7.0, activated: true }];
+  const up = S.updateCollectionItem(cur);
+  assert(up.ok === false && up.reason === "worse", "更新后不占位 → 拒绝", JSON.stringify(up));
+  assert(S.getCollection().find(x => x.id === "t4").substats[0].value === 10.5, "拒绝时保留旧件");
+  const miss = S.updateCollectionItem({ id: "nope" });
+  assert(miss.ok === false && miss.reason === "missing", "更新不存在的 id → missing", JSON.stringify(miss));
+  S.removeCollectionItem("t5");
+
+  // 存量并列件：ties 不自动删，批量清理才删
+  S.getCollection().push(JSON.parse(JSON.stringify(S.getCollection()[0])));   // 直接造一个并列件（绕过入库拦截）
+  S.getCollection()[S.getCollection().length - 1].id = "dup";
+  const idx2 = core.collectionIndex(S.getCollection());
+  assert(idx2.ties.length === 1 && idx2.ties[0].id === "dup", "旧并列件归入 ties（不算 redundant）", JSON.stringify(idx2.ties.map(x => x.id)));
+  assert(S.pruneCollection(null).length === 0 && S.getCollection().some(x => x.id === "dup"), "pruneCollection 不删并列件");
+  const n = S.removeCollectionItems(["dup", "nope"]);
+  assert(n === 1 && !S.getCollection().some(x => x.id === "dup"), "批量删除只删存在的 id", String(n));
+  S.removeCollectionItems(S.getCollection().map(x => x.id));
+}
+
+console.log("== adapters.backup_v1 透传 customSets / collection（2026-10-25 P0）==");
+{
+  const adapters = global.App.adapters;
+  const io = global.App.io || (require("./js/io.js"), global.App.io);
+  const raw = {
+    version: C.STORAGE_VERSION, exportedAt: "2026-10-25T00:00:00.000Z",
+    roles: [{ id: "r1", name: "备份角色", artifacts: {} }],
+    customSets: ["自定义套装"],
+    collection: [{ id: "k1", slot: "flower", set: "S", mainStat: "生命值", level: 20, substats: [] }]
+  };
+  const hit = adapters.convertFile(raw);
+  assert(hit.adapter && hit.adapter.id === "backup_v1", "识别为本项目备份");
+  assert(Array.isArray(hit.store.customSets) && hit.store.customSets[0] === "自定义套装", "convert 透传 customSets");
+  assert(Array.isArray(hit.store.collection) && hit.store.collection[0].id === "k1", "convert 透传 collection");
+
+  // 端到端回归：适配器 → mergeStore(覆盖) 后两字段仍在（曾在此丢失，导入预览显示「藏品 N → 0」）
+  const merged = io.mergeStore({ roles: [], customSets: [], collection: [] }, hit.store, "overwrite");
+  assert(merged.collection.length === 1 && merged.collection[0].id === "k1", "覆盖导入后藏品库不丢（回归）");
+  assert(merged.customSets.length === 1 && merged.customSets[0] === "自定义套装", "覆盖导入后自定义套装不丢（回归）");
+
+  // 旧备份没有这两个字段 → 补空数组，不影响识别
+  const legacy = adapters.convertFile({ version: C.STORAGE_VERSION, roles: [] });
+  assert(legacy.adapter && legacy.adapter.id === "backup_v1", "旧备份仍识别为 backup_v1");
+  assert(Array.isArray(legacy.store.customSets) && Array.isArray(legacy.store.collection)
+    && legacy.store.customSets.length === 0 && legacy.store.collection.length === 0, "旧备份（无两字段）→ 补空数组");
+}
+
+console.log("== core.auditRoles 配置体检（2026-10-29，只读）==");
+{
+  const fullArts = () => ({
+    flower: { slot: "flower", mainStat: "生命值" },
+    plume: { slot: "plume", mainStat: "攻击力" },
+    sands: { slot: "sands", mainStat: "攻击力百分比" },
+    goblet: { slot: "goblet", mainStat: "火元素伤害加成" },
+    circlet: { slot: "circlet", mainStat: "暴击率" }
+  });
+  const mk = (name, eff, w, extra) => Object.assign({
+    id: name, name, effectiveStats: eff, weights: w,
+    erRequirement: 180, currentER: 180, artifacts: fullArts()
+  }, extra || {});
+  const roles = [
+    mk("空配置", [], {}, { artifacts: {} }),
+    mk("全一", ["暴击率", "暴击伤害"], { "暴击率": 1, "暴击伤害": 1 }),
+    mk("单条", ["暴击率"], { "暴击率": 1 }),
+    mk("有梯度", ["暴击率", "暴击伤害"], { "暴击率": 1, "暴击伤害": 0.8 }),
+    mk("残留", ["暴击率", "元素充能效率"], { "暴击率": 1, "元素充能效率": 0.6, "生命值": 1 }),
+    mk("充能占位", ["元素充能效率"], { "元素充能效率": 1 }),
+    mk("充能已配", ["元素充能效率"], { "元素充能效率": 1 }, { erRequirement: 250, currentER: 220 }),
+    mk("缺部位", ["暴击率"], { "暴击率": 1 }, { artifacts: { flower: { mainStat: "生命值" } } })
+  ];
+  const before = JSON.stringify(roles);
+  const audit = core.auditRoles(roles);
+  assert(JSON.stringify(roles) === before, "体检纯读：不改动角色数据");
+  assert(audit.total === 8 && audit.affected === 5, "总数 8 / 受影响 5", `${audit.total}/${audit.affected}`);
+  const keys = audit.groups.map(g => g.key);
+  assert(keys.join(",") === "empty-eff,flat-weight,missing-slots,er-placeholder,weight-residue",
+    "分组按严重度排序且空组不显示", keys.join(","));
+  const flat = audit.groups.find(g => g.key === "flat-weight");
+  assert(flat.roles.length === 1 && flat.roles[0].name === "全一", "平权只报「≥2 条且全相同」（单条不报）", JSON.stringify(flat.roles));
+  const residue = audit.groups.find(g => g.key === "weight-residue");
+  assert(residue.roles[0].name === "残留" && /生命=1/.test(residue.roles[0].detail),
+    "残留键用词条简称并列值", residue.roles[0].detail);
+  const miss = audit.groups.find(g => g.key === "missing-slots");
+  assert(miss.roles.length === 1 && /死之羽/.test(miss.roles[0].detail),
+    "缺部位按部位全名列出（空有效属性不重复刷屏）", JSON.stringify(miss.roles));
+  const er = audit.groups.find(g => g.key === "er-placeholder");
+  assert(er.roles.length === 2 && !er.roles.some(r => r.name === "充能已配"),
+    "充能占位只认「看充能 + 180/180」", JSON.stringify(er.roles.map(r => r.name)));
+  assert(audit.groups.filter(g => g.key !== "empty-eff").every(g => !g.roles.some(r => r.name === "空配置")),
+    "空配置只归入「有效属性为空」一组");
 }
 
 console.log("== scoreComposition（R2 分数构成）==");

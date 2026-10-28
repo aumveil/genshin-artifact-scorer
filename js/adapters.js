@@ -232,7 +232,16 @@
         return raw && raw.version === C.STORAGE_VERSION && Array.isArray(raw.roles);
       },
       convert(raw) {
-        return { version: C.STORAGE_VERSION, exportedAt: raw.exportedAt || null, roles: raw.roles || [] };
+        // ⚠ 迁移红线（2026-10-25 修）：customSets / collection 必须原样透传。
+        // 曾只返回 roles → 导入自家备份选「覆盖」会把藏品库与自定义套装清空（导入预览显示「藏品 N → 0」）。
+        // 判定「是不是本项目备份」只要求 version + roles，旧备份可能没有后两个字段 → 补空数组。
+        return {
+          version: C.STORAGE_VERSION,
+          exportedAt: raw.exportedAt || null,
+          roles: raw.roles || [],
+          customSets: Array.isArray(raw.customSets) ? raw.customSets : [],
+          collection: Array.isArray(raw.collection) ? raw.collection : []
+        };
       }
     },
     monaAdapter

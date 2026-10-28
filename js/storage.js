@@ -7,7 +7,11 @@
   const C = global.App.constants;
   const KEY = "gys_reliquary_v" + C.STORAGE_VERSION;
   const FILTER_KEY = "gys_reliquary_filter_v" + C.STORAGE_VERSION;   // 首页筛选状态（独立 key，随角色数据分开存）
+  // 损坏数据隔离（2026-10-25）：load 解析失败时把原始串另存到独立 key。
+  // 否则下一次 save 会用空 store 覆盖原 key，原始数据再无据可查。
+  const CORRUPT_KEY = "gys_reliquary_corrupt_v1";
   let lastLoadMigrated = false;   // R6：最近一次 load 是否发生迁移改写（供启动时一次性提示）
+  let lastLoadCorrupt = null;     // 本次 load 是否读到损坏数据：{ size, saved }（null = 未损坏）
 
   function emptyStore() {
     return { version: C.STORAGE_VERSION, exportedAt: null, roles: [], customSets: [], collection: [] };
@@ -63,14 +67,23 @@
    */
   function sanitizeStore(store) {
     if (!store || !Array.isArray(store.roles)) return store;
+    // 角色条目必须是对象：null / 字符串等异常项直接剔除，避免 UI 取字段时抛错（2026-10-29，§8.44）
+    store.roles = store.roles.filter(r => r && typeof r === "object" && !Array.isArray(r));
     store.roles.forEach(role => {
-      if (!role) return;
+      // 配置字段兜底：缺失/类型错误时补默认值（导入外部数据或手工改 JSON 都可能缺）
+      if (!Array.isArray(role.effectiveStats)) role.effectiveStats = [];
+      if (!role.weights || typeof role.weights !== "object" || Array.isArray(role.weights)) role.weights = {};
       if (!role.element) {
         const guessed = C.CHARACTER_ELEMENT_HINTS[role.name];
         if (guessed) role.element = guessed;
       }
-      const arts = role.artifacts || {};
-      C.SLOT_KEYS.forEach(key => stripDeprecatedArtifactFields(arts[key]));
+      // ⚠ artifacts 必须存在（2026-10-29，§8.44）：旧代码在首页/详情直接读 role.artifacts[slot]，
+      // 缺这个字段会让整个视图抛错 → app 已清空 → 白屏。缺失时补空对象，5 部位补 null。
+      if (!role.artifacts || typeof role.artifacts !== "object" || Array.isArray(role.artifacts)) role.artifacts = {};
+      C.SLOT_KEYS.forEach(key => {
+        if (role.artifacts[key] === undefined) role.artifacts[key] = null;
+        stripDeprecatedArtifactFields(role.artifacts[key]);
+      });
     });
     // 藏品库（2026-10-11）：确保为数组，并逐件剥离废弃字段
     if (!Array.isArray(store.collection)) store.collection = [];
@@ -79,11 +92,38 @@
     return store;
   }
 
-  function load() {
+  /**
+   * 损坏数据隔离（2026-10-25，P0 数据安全）：
+   * 把无法解析的原始串原样写到 CORRUPT_KEY（不二次 JSON 包装，避免体积翻倍 / 转义破坏可读性），
+   * 使「本次以空数据启动」不会立刻造成不可逆丢失——原 key 保持不动，用户可下载后用编辑器修复。
+   * 隔离失败（容量不足 / 隐私模式）只记录状态，由启动提示改为「立即导出备份」的警告口径。
+   */
+  function quarantineCorrupt(raw) {
+    let saved = false;
     try {
-      const raw = localStorage.getItem(KEY);
+      const prev = localStorage.getItem(CORRUPT_KEY);
+      if (prev !== raw) localStorage.setItem(CORRUPT_KEY, raw);   // 同内容不重复写（避免每次刷新都占配额）
+      saved = true;
+    } catch (e) {
+      console.warn("损坏数据隔离失败（可能超出存储容量）：", e);
+    }
+    lastLoadCorrupt = { size: raw.length, saved };
+    console.warn(`本地数据损坏（${raw.length} 字节）→ ${saved ? "已隔离至 " + CORRUPT_KEY : "隔离失败"}，请尽快导出损坏副本`);
+  }
+
+  function load() {
+    lastLoadCorrupt = null;   // 每次加载重置（同一会话内可能被测试/导入多次调用）
+    let raw = null;
+    try {
+      raw = localStorage.getItem(KEY);
       if (!raw) return emptyStore();
       const data = JSON.parse(raw);
+      // 合法 JSON 但结构不对（缺 roles）也按损坏处理：migrate 会静默返回空 store，
+      // 不隔离的话同样会在下一次保存时被覆盖。
+      if (!data || typeof data !== "object" || !Array.isArray(data.roles)) {
+        quarantineCorrupt(raw);
+        return emptyStore();
+      }
       const migrated = migrate(data);
       // 迁移补过字段（如 element）时立即回写：否则内存里已补齐、localStorage 仍是空的，
       // 会出现「导出有、存储没有」的不一致，且每次打开都要重算一遍。
@@ -95,13 +135,22 @@
       } catch (e) { /* 超容量/隐私模式：静默忽略，本次使用不受影响 */ }
       return migrated;
     } catch (e) {
-      console.warn("存储数据损坏，已重置：", e);
+      console.warn("存储数据损坏，已隔离原始内容：", e);
+      if (typeof raw === "string" && raw) quarantineCorrupt(raw);
       return emptyStore();
     }
   }
 
   /** 本次加载是否发生过格式迁移改写（R6 启动提示用） */
   function wasMigrated() { return lastLoadMigrated; }
+
+  /** 本次加载是否读到损坏数据 → { size, saved } | null（启动提示用） */
+  function corruptState() { return lastLoadCorrupt; }
+
+  /** 取隔离的原始串（下载损坏副本用；无则 null） */
+  function getCorruptRaw() {
+    try { return localStorage.getItem(CORRUPT_KEY); } catch (e) { return null; }
+  }
 
   function save(store) {
     try {
@@ -174,5 +223,8 @@
   }
 
   global.App = global.App || {};
-  global.App.storage = { load, save, migrate, emptyStore, sanitizeStore, KEY, FILTER_KEY, loadFilter, saveFilter, wasMigrated };
+  global.App.storage = {
+    load, save, migrate, emptyStore, sanitizeStore, KEY, FILTER_KEY, CORRUPT_KEY,
+    loadFilter, saveFilter, wasMigrated, corruptState, getCorruptRaw
+  };
 })(window);

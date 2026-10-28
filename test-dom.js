@@ -1240,6 +1240,236 @@ const path = require("path");
   }
 
 
+  // 配置体检（2026-10-29，只读）：⋯ 菜单入口 → 分组清单 → 点角色打开配置
+  {
+    const chkRole = App.store.newRole("测试-体检");
+    window.document.getElementById("btnMore").click();
+    await new Promise(r => setTimeout(r, 30));
+    const btnChk = window.document.getElementById("btnCheckup");
+    if (btnChk) btnChk.click();
+    await new Promise(r => setTimeout(r, 100));
+    const modal = window.document.querySelector("#modalRoot .modal");
+    const title = modal ? modal.querySelector("h3").textContent : "";
+    const txt = modal ? modal.querySelector(".modal-body").textContent : "";
+    const chip = modal ? Array.from(modal.querySelectorAll(".chk-role")).find(b => b.textContent.includes("测试-体检")) : null;
+    const okOpen = !!btnChk && title === "配置体检" && /有效属性为空/.test(txt) && !!chip;
+    console.log("配置体检：入口 / 标题 / 空配置分组 / 角色胶囊:", okOpen ? "✓" : "✗",
+      `(${title} | ${txt.replace(/\s+/g, " ").slice(0, 36)})`);
+    if (!okOpen) process.exitCode = 1;
+    if (chip) {
+      chip.click();
+      await new Promise(r => setTimeout(r, 100));
+      const t2 = window.document.querySelector("#modalRoot .modal h3");
+      const okCfg = !!t2 && /^角色配置：测试-体检/.test(t2.textContent.trim());
+      console.log("配置体检：点角色打开配置弹窗:", okCfg ? "✓" : "✗", t2 ? t2.textContent : "无");
+      if (!okCfg) process.exitCode = 1;
+      const closeBtn = window.document.querySelector("#modalRoot .modal-close");
+      if (closeBtn) closeBtn.click();
+      await new Promise(r => setTimeout(r, 200));
+    }
+    App.store.deleteRole(chkRole.id);
+  }
+
+  // 渲染失败兜底 + 缺 artifacts 自动补（2026-10-29，§8.44）
+  {
+    // 先回列表（前面的用例可能停在评估页）
+    window.document.getElementById("logoBtn").click();
+    await new Promise(r => setTimeout(r, 60));
+
+    // ① 人为让渲染抛错 → 兜底面板；恢复后「重试」回列表
+    const missingSlots = App.data.missingSlots;
+    App.data.missingSlots = () => { throw new Error("测试-渲染失败"); };
+    App.ui.render();
+    await new Promise(r => setTimeout(r, 60));
+    const panel = app.querySelector(".empty");
+    const title = panel ? (panel.querySelector(".empty-title") || {}).textContent : "";
+    const errTxt = panel ? (panel.querySelector(".render-err") || {}).textContent : "";
+    const btnRetry = panel ? Array.from(panel.querySelectorAll("button")).find(b => b.textContent.includes("重试")) : null;
+    const okFallback = title === "页面渲染失败" && /测试-渲染失败/.test(errTxt) && !!btnRetry;
+    console.log("渲染失败兜底：面板 / 错误信息 / 重试按钮:", okFallback ? "✓" : "✗", `(${title} | ${errTxt})`);
+    if (!okFallback) process.exitCode = 1;
+    App.data.missingSlots = missingSlots;
+    if (btnRetry) btnRetry.click();
+    await new Promise(r => setTimeout(r, 80));
+    const okBack = !!app.querySelector(".role-card");
+    console.log("渲染失败兜底：重试恢复列表:", okBack ? "✓" : "✗");
+    if (!okBack) process.exitCode = 1;
+
+    // ② 角色缺 artifacts → sanitize 补齐；列表与详情都不白屏
+    const bad = App.store.newRole("测试-缺artifacts");
+    delete bad.artifacts;
+    App.store.save();
+    window.App.storage.sanitizeStore(App.store.getStore());
+    const fixed = App.store.getRole(bad.id);
+    const SLOTS = ["flower", "plume", "sands", "goblet", "circlet"];
+    const okFix = !!(fixed && fixed.artifacts && SLOTS.every(k => fixed.artifacts[k] === null));
+    App.ui.render();
+    await new Promise(r => setTimeout(r, 60));
+    const card = Array.from(app.querySelectorAll(".role-card")).find(c => c.textContent.includes("测试-缺artifacts"));
+    if (card) card.click();
+    await new Promise(r => setTimeout(r, 100));
+    const dt = app.querySelector(".detail-title");
+    const detailOk = !!dt && dt.textContent.includes("测试-缺artifacts");
+    const ok = okFix && !!card && detailOk;
+    console.log("缺 artifacts：sanitize 补齐 / 列表可见 / 详情可开:", ok ? "✓" : "✗",
+      `(arts ${!!(fixed && fixed.artifacts)} | card ${!!card} | detail ${detailOk})`);
+    if (!ok) process.exitCode = 1;
+    App.store.deleteRole(bad.id);
+    App.ui.render();
+    await new Promise(r => setTimeout(r, 60));
+  }
+
+  // 删除角色 → 撤销（2026-10-29，§8.45）
+  {
+    const dr = App.store.newRole("测试-删除撤销");
+    App.ui.render();
+    await new Promise(r => setTimeout(r, 60));
+    const card = Array.from(app.querySelectorAll(".role-card")).find(c => c.textContent.includes("测试-删除撤销"));
+    if (card) card.click();
+    await new Promise(r => setTimeout(r, 100));
+    const delBtn = Array.from(app.querySelectorAll(".detail-head button")).find(b => b.textContent.trim() === "删除");
+    if (delBtn) delBtn.click();
+    await new Promise(r => setTimeout(r, 100));
+    const confirmBtn = Array.from(window.document.querySelectorAll("#modalRoot .modal-foot button"))
+      .find(b => b.textContent.trim() === "删除");
+    if (confirmBtn) confirmBtn.click();
+    await new Promise(r => setTimeout(r, 160));
+    const gone = !App.store.getRole(dr.id);
+    const undoBtn = Array.from(window.document.querySelectorAll(".toast .toast-act"))
+      .filter(b => b.textContent.trim() === "撤销").pop();
+    if (undoBtn) undoBtn.click();
+    await new Promise(r => setTimeout(r, 140));
+    const back = App.store.getRole(dr.id);
+    const backCard = Array.from(app.querySelectorAll(".role-card")).find(c => c.textContent.includes("测试-删除撤销"));
+    const ok = gone && !!undoBtn && !!back && back.name === "测试-删除撤销" && !!backCard;
+    console.log("删除角色：删除 / 撤销 toast / 原位恢复:", ok ? "✓" : "✗",
+      `(gone ${gone} | toast ${!!undoBtn} | back ${!!back} | card ${!!backCard})`);
+    if (!ok) process.exitCode = 1;
+    App.store.deleteRole(dr.id);
+    App.ui.render();
+    await new Promise(r => setTimeout(r, 60));
+  }
+
+  // 保存失败：走反馈层 toast，不再用原生 alert（2026-10-29，§8.45）
+  {
+    const origSet = window.localStorage.setItem;
+    const origAlert = window.alert;
+    let alerted = false;
+    window.alert = () => { alerted = true; };
+    window.localStorage.setItem = () => { throw new Error("quota exceeded"); };
+    App.store.save();
+    await new Promise(r => setTimeout(r, 80));
+    const failToast = Array.from(window.document.querySelectorAll(".toast"))
+      .find(t => t.textContent.includes("保存失败"));
+    const ok = !!failToast && !alerted;
+    console.log("保存失败：走 toast / 不弹原生 alert:", ok ? "✓" : "✗", `(toast ${!!failToast} | alert ${alerted})`);
+    if (!ok) process.exitCode = 1;
+    window.localStorage.setItem = origSet;
+    window.alert = origAlert;
+    if (failToast) failToast.remove();
+  }
+
+  // 弹窗语义 + 焦点陷阱 + 遮罩关闭（2026-10-29，§8.46）
+  {
+    const fr = App.store.newRole("测试-弹窗焦点");
+    App.ui.render();
+    await new Promise(r => setTimeout(r, 60));
+    const card = Array.from(app.querySelectorAll(".role-card")).find(c => c.textContent.includes("测试-弹窗焦点"));
+    if (card) card.click();
+    await new Promise(r => setTimeout(r, 100));
+    const cfgBtn = Array.from(app.querySelectorAll(".detail-head button")).find(b => b.textContent.trim() === "角色配置");
+    if (cfgBtn) cfgBtn.focus();
+    if (cfgBtn) cfgBtn.click();
+    await new Promise(r => setTimeout(r, 150));
+
+    const doc = window.document;
+    const root = doc.getElementById("modalRoot");
+    const modal = doc.querySelector("#modalRoot .modal");
+    const labelledby = modal ? modal.getAttribute("aria-labelledby") : "";
+    const okRole = !!modal && modal.getAttribute("role") === "dialog" && modal.getAttribute("aria-modal") === "true"
+      && !!labelledby && !!doc.getElementById(labelledby)
+      && root.getAttribute("aria-hidden") === "false"
+      && modal.contains(doc.activeElement);
+    console.log("弹窗语义：role / aria-modal / labelledby / aria-hidden / 首焦点:", okRole ? "✓" : "✗",
+      `(role ${modal && modal.getAttribute("role")} | labelled ${!!labelledby} | hidden ${root.getAttribute("aria-hidden")} | focusIn ${modal ? modal.contains(doc.activeElement) : false})`);
+    if (!okRole) process.exitCode = 1;
+
+    // Tab 首位循环
+    const SEL = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const list = modal ? Array.from(modal.querySelectorAll(SEL)) : [];
+    const first = list[0], last = list[list.length - 1];
+    let wrapFwd = false, wrapBack = false;
+    if (first && last) {
+      last.focus();
+      doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+      wrapFwd = doc.activeElement === first;
+      first.focus();
+      doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }));
+      wrapBack = doc.activeElement === last;
+    }
+    console.log("焦点陷阱：末→首 / 首→末:", wrapFwd && wrapBack ? "✓" : "✗", `(${wrapFwd} / ${wrapBack})`);
+    if (!(wrapFwd && wrapBack)) process.exitCode = 1;
+
+    // Esc 关闭 → 容器恢复隐藏 + 焦点回到触发按钮
+    doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await new Promise(r => setTimeout(r, 240));
+    const okClose = root.classList.contains("hidden") && root.getAttribute("aria-hidden") === "true" && doc.activeElement === cfgBtn;
+    console.log("弹窗关闭：aria-hidden 复位 / 焦点回到触发按钮:", okClose ? "✓" : "✗",
+      `(hidden ${root.classList.contains("hidden")} | aria ${root.getAttribute("aria-hidden")} | focusBack ${doc.activeElement === cfgBtn})`);
+    if (!okClose) process.exitCode = 1;
+
+    // 遮罩点击关闭（全局只注册一次，这里验证仍生效）
+    if (cfgBtn) cfgBtn.click();
+    await new Promise(r => setTimeout(r, 120));
+    root.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await new Promise(r => setTimeout(r, 220));
+    const okBackdrop = root.classList.contains("hidden");
+    console.log("遮罩点击关闭:", okBackdrop ? "✓" : "✗");
+    if (!okBackdrop) process.exitCode = 1;
+
+    App.store.deleteRole(fr.id);
+    App.ui.render();
+    await new Promise(r => setTimeout(r, 60));
+  }
+
+  // 并列藏品提示 + 清理（2026-10-29，§8.47）
+  {
+    const mkC = id => ({ id, slot: "circlet", set: "测试套装", mainStat: "暴击率", level: 20,
+      substats: [{ stat: "暴击率", value: 7.8, activated: true }, { stat: "暴击伤害", value: 21.8, activated: true }] });
+    App.store.getCollection().push(mkC("dt_a"), mkC("dt_b"));
+    App.store.save();
+    window.document.getElementById("btnCollection").click();
+    await new Promise(r => setTimeout(r, 140));
+    const bar = app.querySelector(".warn.coll-ties");
+    const okBar = !!bar && bar.textContent.includes("1 件并列藏品");
+    console.log("并列藏品：提示条出现:", okBar ? "✓" : "✗", bar ? bar.textContent.replace(/\s+/g, " ") : "无");
+    if (!okBar) process.exitCode = 1;
+
+    const openBtn = bar ? Array.from(bar.querySelectorAll("button")).find(b => b.textContent.includes("清理")) : null;
+    if (openBtn) openBtn.click();
+    await new Promise(r => setTimeout(r, 110));
+    const confirmTitle = window.document.querySelector("#modalRoot .modal h3");
+    const confirmBtn = Array.from(window.document.querySelectorAll("#modalRoot .modal-foot button"))
+      .find(b => b.textContent.trim() === "全部移除");
+    const okConfirm = !!confirmTitle && confirmTitle.textContent === "清理并列藏品" && !!confirmBtn;
+    console.log("并列藏品：清理确认框:", okConfirm ? "✓" : "✗", confirmTitle ? confirmTitle.textContent : "无");
+    if (!okConfirm) process.exitCode = 1;
+
+    if (confirmBtn) confirmBtn.click();
+    await new Promise(r => setTimeout(r, 200));
+    const gone = !App.store.getCollection().some(x => x.id === "dt_b");
+    const kept = App.store.getCollection().some(x => x.id === "dt_a");
+    const barGone = !app.querySelector(".warn.coll-ties");
+    const ok = gone && kept && barGone;
+    console.log("并列藏品：移除后入/保留先入/提示条消失:", ok ? "✓" : "✗",
+      `(gone ${gone} | kept ${kept} | barGone ${barGone})`);
+    if (!ok) process.exitCode = 1;
+
+    App.store.removeCollectionItems(["dt_a"]);
+    App.ui.render();
+    await new Promise(r => setTimeout(r, 60));
+  }
+
   if (window.__testErrors.length) process.exitCode = 1;
   // 退出码 = 累计断言结果。⚠️ 勿写死 process.exit(0)：那会把上面所有 exitCode = 1 全部吞掉，
   //    令 `node test-dom.js; echo $?` 永远为 0、CI/脚本无法感知失败（2026-10-09 修）。

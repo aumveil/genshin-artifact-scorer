@@ -305,6 +305,10 @@ body { background: var(--bg-0); }
 .empty-title { font-size: var(--fs-2xl); font-weight: 700; color: var(--text-1); margin-top: 6px; }
 .empty-desc { font-size: var(--fs-base); color: var(--text-3); max-width: 420px; }
 .empty .btn { margin-top: 14px; }
+/* 渲染失败兜底（2026-10-29，§8.44）：动作行 + 错误摘要；按钮的 margin-top 由行统一给 */
+.empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 14px; }
+.empty-actions .btn { margin-top: 0; }
+.render-err { margin-top: 2px; max-width: 520px; font-size: var(--fs-sm); color: var(--text-3); word-break: break-word; }
 
 /* ============================== 7. 筛选栏 ============================== */
 .filter-bar {
@@ -998,14 +1002,17 @@ body { background: var(--bg-0); }
   color: var(--yellow-ink); padding: 9px 13px; border-radius: var(--r-sm);
   font-size: var(--fs-md); margin-bottom: 12px; line-height: 1.6;
 }
-/* 套装字段 / 散件位与实况不一致提示条（详情页）：文案 + 右侧修正按钮 */
+/* 套装字段 / 散件位与实况不一致提示条（详情页）：文案 + 右侧修正按钮
+   并列藏品清理条（藏品页，2026-10-29）复用同一套 flex 布局 */
 .warn.set-mismatch,
-.warn.loose-mismatch {
+.warn.loose-mismatch,
+.warn.coll-ties {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap;
 }
 .warn.set-mismatch .btn,
-.warn.loose-mismatch .btn { flex: 0 0 auto; }
+.warn.loose-mismatch .btn,
+.warn.coll-ties .btn { flex: 0 0 auto; }
 .err-box {
   background: color-mix(in srgb, var(--red) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--red) 38%, transparent);
@@ -1593,3 +1600,29 @@ body { background: var(--bg-0); }
 }
 .appearance-toggle:hover { background: var(--fill-1-hover); color: var(--brand); }
 .appearance-toggle:focus-visible { outline: none; box-shadow: var(--glow-gold); }
+
+/* ============ 配置体检（2026-10-29，§8.43）============ */
+/* 只读诊断清单：分组标题 + 角色胶囊；高危红、警示黄、提示灰，均走既有 token */
+.chk-summary { font-size: var(--fs-md); color: var(--text-2); line-height: 1.75; }
+.chk-summary b { color: var(--brand); font-variant-numeric: tabular-nums; }
+.chk-group { margin-top: 18px; }
+.chk-group-head { display: flex; align-items: baseline; gap: 8px; }
+.chk-badge { font-size: var(--fs-base); font-weight: 600; color: var(--text-1); }
+.chk-group.chk-danger .chk-badge { color: var(--red-ink); }
+.chk-group.chk-warn .chk-badge { color: var(--yellow-ink); }
+.chk-group.chk-info .chk-badge { color: var(--text-2); }
+.chk-count { font-size: var(--fs-sm); color: var(--text-3); }
+.chk-desc { margin: 3px 0 9px; font-size: var(--fs-sm); color: var(--text-3); line-height: 1.6; }
+.chk-roles { display: flex; flex-wrap: wrap; gap: 6px; }
+.chk-role {
+  display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%;
+  padding: 4px 9px; border-radius: 7px; border: 1px solid var(--line-1);
+  background: color-mix(in srgb, var(--text-1) 6%, transparent);
+  color: var(--text-1); font: inherit; font-size: var(--fs-md); cursor: pointer;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.chk-role:hover { background: color-mix(in srgb, var(--brand) 12%, transparent); border-color: color-mix(in srgb, var(--brand) 40%, var(--line-1)); }
+.chk-role:focus-visible { outline: none; box-shadow: var(--glow-gold); }
+.chk-role b { font-weight: 600; white-space: nowrap; }
+.chk-role span { font-size: var(--fs-sm); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chk-empty { margin-top: 16px; font-size: var(--fs-md); color: var(--text-3); }

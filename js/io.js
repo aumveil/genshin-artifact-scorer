@@ -39,6 +39,25 @@
     try { localStorage.setItem(BACKUP_SNOOZE_KEY, String(Date.now() + 7 * 86400000)); } catch (e) { /* 静默 */ }
   }
 
+  /** 触发浏览器下载文本（导出 / 损坏副本共用；withBom 仅常规导出开启，便于 Excel 等工具识别） */
+  function downloadText(text, fname, withBom) {
+    const blob = new Blob([(withBom ? "\ufeff" : "") + text], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function dateStamp() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
   function exportBackup(store) {
     const payload = {
       version: C.STORAGE_VERSION,
@@ -48,19 +67,21 @@
       collection: Array.isArray(store.collection) ? store.collection : undefined   // 藏品库（2026-10-11）
     };
     const json = JSON.stringify(payload, null, 2);
-    const blob = new Blob(["\ufeff" + json], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const d = new Date();
-    const pad = n => String(n).padStart(2, "0");
-    const fname = `圣遗物备份_${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.json`;
-    a.href = url;
-    a.download = fname;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const fname = `圣遗物备份_${dateStamp()}.json`;
+    downloadText(json, fname, true);
     markBackupExported();   // R6：备份提醒计时重置
+    return fname;
+  }
+
+  /**
+   * 下载「损坏数据」的原始副本（2026-10-25，配套 storage 的损坏隔离）。
+   * 内容**原样**落盘（不加 BOM、不重排），供用户手工修复后重新导入；无隔离副本 → null。
+   */
+  function downloadCorruptBackup() {
+    const raw = global.App.storage.getCorruptRaw();
+    if (!raw) return null;
+    const fname = `圣遗物数据_损坏副本_${dateStamp()}.json`;
+    downloadText(raw, fname, false);
     return fname;
   }
 
@@ -139,5 +160,5 @@
   }
 
   global.App = global.App || {};
-  global.App.io = { exportBackup, readFile, importFile, mergeStore, backupReminderDue, snoozeBackupReminder };
+  global.App.io = { exportBackup, downloadCorruptBackup, readFile, importFile, mergeStore, backupReminderDue, snoozeBackupReminder };
 })(window);

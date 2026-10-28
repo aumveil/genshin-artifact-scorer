@@ -82,8 +82,52 @@
   }
 
   // ============ 渲染入口 ============
+  /**
+   * 渲染失败兜底（2026-10-29，§8.44）：任何子视图抛错都只替换内容区，不留白页。
+   * 给出「导出备份 / 重试 / 回到列表」三个出口，错误信息可复制给开发者定位。
+   */
+  function renderErrorPanel(err) {
+    const wrap = el("div", "empty");
+    wrap.appendChild(el("div", "icon", ico("warn")));
+    wrap.appendChild(el("div", "empty-title", "页面渲染失败"));
+    wrap.appendChild(el("div", "empty-desc",
+      "数据里可能有字段缺失或格式异常，导致当前视图无法绘制。建议先导出备份，再修复或重新导入；也可以回到列表继续使用其他角色。"));
+    wrap.appendChild(el("div", "empty-desc render-err", esc(String((err && err.message) || err))));
+    const actions = el("div", "empty-actions");
+    const btnExport = el("button", "btn", ico("export") + "导出备份");
+    btnExport.addEventListener("click", () => {
+      try {
+        const fname = global.App.io.exportBackup(store.getStore());
+        feedback.toast(`已导出：${fname}`, "success");
+      } catch (e) {
+        feedback.toast("导出失败：" + ((e && e.message) || e), "error");
+      }
+    });
+    actions.appendChild(btnExport);
+    if (view.type !== "list") {
+      const btnList = el("button", "btn", "回到列表");
+      btnList.addEventListener("click", () => { view = { type: "list" }; render(); });
+      actions.appendChild(btnList);
+    }
+    const btnRetry = el("button", "btn btn-primary", "重试");
+    btnRetry.addEventListener("click", () => render());
+    actions.appendChild(btnRetry);
+    wrap.appendChild(actions);
+    return wrap;
+  }
+
   function render() {
     const app = $("#app");
+    try {
+      renderInto(app);
+    } catch (e) {
+      console.error("渲染失败：", e);
+      app.innerHTML = "";
+      app.appendChild(renderErrorPanel(e));
+    }
+  }
+
+  function renderInto(app) {
     app.innerHTML = "";
     const roles = store.getRoles();
     // —— 视图切换方向感（2026-10-15 批次 5）：进入详情 = 前进（右滑入）、详情→列表 = 后退（左滑入）、
@@ -153,11 +197,58 @@
       confirmText: "创建"
     }).then(name => {
       if (name == null) return;              // 取消 / Esc
-      const role = store.newRole(name.trim() || "新角色");
+      const role = store.newRole(name);
+      // 重名保护（2026-10-25）：newRole 返回 { error } 而不是角色对象 → 必须拦住，否则 role.id 为 undefined
+      if (!role || role.error) {
+        feedback.info({
+          title: "无法新建角色",
+          type: "warn",
+          message: `<p>${esc((role && role.error) || "创建失败")}：<b>${esc(name)}</b></p>` +
+            `<p>请换一个名字，或先在列表中打开同名角色。</p>`
+        });
+        return;
+      }
       view = { type: "detail", roleId: role.id };
       render();
       openRoleConfigModal(store.getRole(role.id));
     });
+  }
+
+  // ============ 配置体检（只读，2026-10-29，§8.43）============
+  /**
+   * 列出「会让评分不可信」的角色配置问题（口径见 core.auditRoles）。
+   * **只读**：不新增任何写路径；点击角色 = 关闭本弹窗并打开既有角色配置弹窗。
+   */
+  function openConfigCheckup() {
+    const audit = core.auditRoles(store.getRoles());
+    const body = el("div", "chk-body");
+    const lead = audit.groups.length
+      ? `共 ${audit.total} 个角色，其中 <b>${audit.affected}</b> 个存在至少一项配置问题；点击角色名可直接打开配置。`
+      : `共 ${audit.total} 个角色，未发现配置问题。`;
+    body.innerHTML = `<div class="chk-summary">${lead} 本页只读，不会改动数据。</div>`;
+    audit.groups.forEach(g => {
+      const sec = el("div", "chk-group chk-" + g.severity);
+      sec.innerHTML =
+        `<div class="chk-group-head"><span class="chk-badge">${esc(g.label)}</span><span class="chk-count num">${g.roles.length}</span></div>` +
+        `<div class="chk-desc">${esc(g.desc)}</div>` +
+        `<div class="chk-roles">` + g.roles.map(r =>
+          `<button type="button" class="chk-role" data-id="${esc(r.id)}" title="${esc(r.name)}｜${esc(r.detail)}">` +
+            `<b>${esc(r.name)}</b><span>${esc(r.detail)}</span></button>`).join("") +
+        `</div>`;
+      body.appendChild(sec);
+    });
+    if (!audit.groups.length) {
+      body.appendChild(el("div", "chk-empty", "权值、充能、部位与有效属性都没有发现异常。"));
+    }
+    body.addEventListener("click", e => {
+      const chip = e.target.closest(".chk-role");
+      if (!chip) return;
+      const role = store.getRole(chip.dataset.id);
+      if (!role) return;
+      closeModal();
+      openRoleConfigModal(role);
+    });
+    openModal("配置体检", body, null);
   }
 
   // ============ 视图 1：角色列表（筛选 + 分数降序 + 单行信息总览卡片）============
@@ -544,11 +635,24 @@
         cancelText: "取消",
         danger: true
       }).then(ok => {
-        if (ok) {
-          store.deleteRole(role.id);
-          view = { type: "list" };
-          render();
-        }
+        if (!ok) return;
+        const idx = store.getRoles().indexOf(role);          // 删除前记录原位置（撤销时原位插回）
+        const snapshot = JSON.parse(JSON.stringify(role));   // 深拷贝：撤销后不与现役对象共享引用
+        store.deleteRole(role.id);
+        view = { type: "list" };
+        render();
+        // 删除可撤销（2026-10-29）：与替换撤销同一套 toast action，6s 内有效
+        feedback.toast(`已删除「${snapshot.name}」`, "info", 6000, {
+          label: "撤销",
+          fn: () => {
+            if (store.restoreRole(snapshot, idx)) {
+              render();
+              feedback.toast(`已恢复「${snapshot.name}」`, "success");
+            } else {
+              feedback.toast("恢复失败：该角色已存在", "error");
+            }
+          }
+        });
       });
     });
     grpNav.append(btnBack);
@@ -1058,8 +1162,14 @@
       if (isColl) {
         // 藏品件：写入藏品库（store 内自动清理「被完全取代」的旧件）
         if (isCollEdit && prefill && prefill.id) artifact.id = prefill.id;
-        const rec = collRecordWon(artifact);   // 新纪录（R7）：入藏前判定刷新了哪些位
+        // 一位一件（2026-10-29）：所有维度都没严格超过 → 不入库 / 不更新；比较基线排除自身旧版本
+        const baseColl = store.getCollection().filter(a => !(isCollEdit && a.id === artifact.id));
         const r = isCollEdit ? store.updateCollectionItem(artifact) : store.addCollectionItem(artifact);
+        if (r && r.ok === false) {
+          feedback.toast(collRejectText(r, isCollEdit), "warn", 6000);
+          return;   // 弹窗保持打开，便于调整
+        }
+        const rec = collRecordWon(artifact, baseColl);   // 新纪录（R7）：与入库前的库比较
         const removed = ((r && r.removed) || []).length;
         closeModal();
         if (view.type !== "collection") view = { type: "collection" };
@@ -2013,8 +2123,14 @@
     const addBtn = box.querySelector(".coll-add");
     if (addBtn) {
       addBtn.addEventListener("click", () => {
-        const rec = collRecordWon(art);   // 新纪录（R7）：入藏前判定刷新了哪些位
+        const base = store.getCollection().slice();   // 入库前快照（add 会就地 push）
         const r = store.addCollectionItem(art);
+        if (r && r.ok === false) {
+          // 一位一件（2026-10-29）：未占位不入藏，面板保持打开
+          feedback.toast(collRejectText(r, false), "warn", 6000);
+          return;
+        }
+        const rec = collRecordWon(art, base);   // 新纪录（R7）：与入库前的库比较
         const removed = ((r && r.removed) || []).length;
         pendingArtifact = null;
         closeModal();
@@ -2031,7 +2147,7 @@
   function renderCollectionView() {
     const wrap = el("div");
     const collection = store.getCollection();
-    const { holders } = core.collectionIndex(collection);
+    const { holders, ties } = core.collectionIndex(collection);
     const head = el("div", "detail-head");
     head.appendChild(el("div", "detail-title", "圣遗物藏品"));
     const btnCollNew = el("button", "btn btn-primary", ico("plus") + "录入藏品");   // R12：统一置于标题最右
@@ -2042,6 +2158,33 @@
     wrap.appendChild(el("div", "info page-info",
       "藏品库保存未装备给任何角色的圣遗物：按「部位 + 主词条」分桶，每个桶内按 6 个维度各收藏一件最大值。" +
       "藏品件不参与角色评分，但会参与价值评估的「藏品视角」与重塑分析。"));
+
+    // 并列藏品清理（2026-10-29）：同值保留先入者 → 旧并列件不占位、不可见；不自动删，由用户确认
+    if (ties.length) {
+      const bar = el("div", "warn coll-ties");
+      bar.innerHTML = `<span>${ico("warn")}发现 ${ties.length} 件并列藏品：数值与现有藏品完全相同，不会被任何一行显示。</span>`;
+      const btnTies = el("button", "btn btn-sm", "查看并清理");
+      btnTies.addEventListener("click", () => {
+        const lines = ties.map(a =>
+          `「${a.set}」${C.SLOTS[a.slot] ? C.SLOTS[a.slot].name : a.slot} · ${a.mainStat} · Lv${a.level}` +
+          `（${(a.substats || []).map(s => `${C.MAIN_SHORT[s.stat] || s.stat}+${s.value}`).join(" / ")}）`);
+        feedback.confirm({
+          title: "清理并列藏品",
+          message: `${ties.length} 件藏品与现有藏品数值完全相同（除 id 外无差异），不会显示在藏品页。`,
+          detail: lines.join("；") + `。移除后藏品 ${collection.length} → ${collection.length - ties.length} 件。`,
+          confirmText: "全部移除",
+          cancelText: "保留",
+          danger: true
+        }).then(ok => {
+          if (!ok) return;
+          const n = store.removeCollectionItems(ties.map(a => a.id));
+          render();
+          feedback.toast(n ? `已移除 ${n} 件并列藏品` : "没有可移除的并列藏品", n ? "success" : "info");
+        });
+      });
+      bar.appendChild(btnTies);
+      wrap.appendChild(bar);
+    }
 
     // （R13 移除：部位跳转按钮组——矩阵已带部位列头，且矩阵格子可点击跳转对应桶）
 
@@ -2328,6 +2471,7 @@
     const ops = [
       { group: "操作", label: "新建角色", hint: "创建并配置新角色", fn: () => createRoleFlow() },
       { group: "操作", label: "录入新圣遗物", hint: "进入价值评估并打开录入", fn: () => startAssessFlow() },
+      { group: "操作", label: "配置体检", hint: "只读检查权值 / 充能 / 部位配置", fn: () => openConfigCheckup() },
       { group: "操作", label: "导入数据", hint: "备份或外部数据", fn: () => $("#btnImport").click() },
       { group: "操作", label: "导出备份", hint: "下载完整数据备份", fn: () => $("#btnExport").click() },
       { group: "操作", label: "切换外观", hint: "深+金 ⇄ 浅+蓝", fn: () => $("#appearanceToggle").click() }
@@ -2496,9 +2640,25 @@
     } catch (e) { /* 静默 */ }
   }
 
-  /** 新纪录判定（R7）：该件入藏后将刷新哪些位；返回 {n, bucketKey} 或 null（并登记桶标记） */
-  function collRecordWon(art) {
-    const res = core.analyzeCollection(art, store.getCollection());
+  /**
+   * 藏品入库 / 更新被拒时的统一文案（reason: tie / worse / missing）。
+   * 2026-10-29 一位一件：不占位即拒绝，文案必须说清「为什么没进库」。
+   */
+  function collRejectText(r, isEdit) {
+    const why = r.reason === "tie"
+      ? "与现有藏品数值并列（保留先入库的那件）"
+      : r.reason === "missing"
+        ? "该藏品已不存在（可能已被清理）"
+        : "所有维度都没有超过现有藏品";
+    return (isEdit ? "未更新：" : "未入藏：") + why;
+  }
+
+  /**
+   * 入藏前判定刷新了哪些位（R7）：返回 {n, bucketKey} 或 null，并登记桶标记。
+   * collection 可传「入库前的快照」，避免拿已含新件的库比较（2026-10-29）。
+   */
+  function collRecordWon(art, collection) {
+    const res = core.analyzeCollection(art, collection || store.getCollection());
     if (!res.inScope) return null;
     const n = res.rows.filter(r => r.verdict === "new" || r.verdict === "better").length;
     if (!n) return null;
@@ -2528,6 +2688,7 @@
     });
 
     $("#btnImport").addEventListener("click", () => $("#importFile").click());
+    $("#btnCheckup").addEventListener("click", openConfigCheckup);   // 配置体检（2026-10-29，只读）
     $("#importFile").addEventListener("change", async e => {
       const file = e.target.files[0];
       e.target.value = "";
@@ -2570,7 +2731,7 @@
           const warns = (meta.warnings || []).slice(0, 8);
           if (warns.length) lines.push("提示：\n" + warns.map(w => "· " + w).join("\n"));
           if (warns.length > 8) lines.push(`…另有 ${meta.warnings.length - 8} 条`);
-          if (lines.length) html += `<div class="warn" style="margin-top:8px">${esc(lines.join("<br>"))}</div>`;
+          if (lines.length) html += `<div class="warn" style="margin-top:8px">${lines.map(esc).join("<br>")}</div>`;
           html += `<div class="info" style="margin-top:8px">外部导入的角色未配置有效词条/权值，请进入「角色配置」补充后再查看评分。</div>`;
         } else if (res.adapterId === "backup_v1") {
           html += `<div class="info" style="margin-top:8px">（备份数据恢复）</div>`;

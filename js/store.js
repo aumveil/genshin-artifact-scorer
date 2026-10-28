@@ -35,11 +35,24 @@
   }
   function setCurrentRole(id) { state.currentRoleId = id; }
 
+  let lastSaveFailAt = 0;   // 保存失败提示节流（10s）：避免连续操作刷屏
+
   function save() {
     const res = global.App.storage.save(state.store);
     if (!res.ok) {
-      // 写失败（如超容量）提示导出备份
-      alert("数据保存失败（可能超出浏览器存储容量），请尽快「导出」备份！");
+      // 2026-10-29：不再用原生 alert（阻塞且破坏视觉统一）；改走 feedback.toast，保留 console.error 供排查。
+      // 只提示不阻断——写失败时内存数据仍可用，但刷新会丢，文案必须让用户立刻导出。
+      console.error("数据保存失败：", res.error);
+      const fb = global.App.feedback;
+      const now = Date.now();
+      if (fb && typeof fb.toast === "function") {
+        if (now - lastSaveFailAt > 10000) {
+          lastSaveFailAt = now;
+          fb.toast("保存失败：可能超出浏览器存储容量，请立即「导出」备份（本次修改刷新后会丢）", "error", 9000);
+        }
+      } else if (typeof alert === "function") {
+        alert("数据保存失败（可能超出浏览器存储容量），请尽快「导出」备份！");   // 无反馈层时的兜底（正常不会走到）
+      }
     }
   }
 
@@ -47,12 +60,21 @@
     return "id_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
   }
 
-  /** 新建空角色（角色名命中元素映射表时自动带出 element，仍可在角色配置中修改） */
+  /**
+   * 新建空角色（角色名命中元素映射表时自动带出 element，仍可在角色配置中修改）。
+   * 重名保护（2026-10-25 P0）：hash 路由按角色名解析（`#/role/<name>` 恒落第一个）、导入合并也按名匹配，
+   * 同名角色会让两者产生歧义 → 与 updateRole 同口径拒绝，返回 `{ error }`；调用方须判 `role.id`。
+   * 名称统一 trim 后落库（避免「胡桃」与「胡桃 」被当成两个角色）。
+   */
   function newRole(name) {
+    const n = String(name == null ? "" : name).trim() || "新角色";
+    if (state.store.roles.some(r => r && String(r.name || "").trim() === n)) {
+      return { error: "已存在同名角色" };
+    }
     const role = {
       id: genId(),
-      name: name || "新角色",
-      element: global.App.constants.CHARACTER_ELEMENT_HINTS[name] || "",
+      name: n,
+      element: global.App.constants.CHARACTER_ELEMENT_HINTS[n] || "",
       sets: [],                  // 角色所穿套装（0 个=其他/不判套装；1 个=四件套；2 个=两个两件套）
       looseSlot: "goblet",
       effectiveStats: [],
@@ -72,13 +94,16 @@
     return state.store.roles.find(r => r.id === id) || null;
   }
 
-  /** 更新角色（整体替换）；name 去重 */
+  /** 更新角色（整体替换）；name trim + 去重（与 newRole 同口径，2026-10-25） */
   function updateRole(role) {
     const idx = state.store.roles.findIndex(r => r.id === role.id);
     if (idx < 0) return false;
-    // 重名检查（排除自身）
-    const dup = state.store.roles.some(r => r.id !== role.id && r.name === role.name);
+    const nextName = String(role.name == null ? "" : role.name).trim();
+    if (!nextName) return { error: "角色名不能为空" };
+    // 重名检查（排除自身；两侧都 trim 后比较，避免尾随空格绕过）
+    const dup = state.store.roles.some(r => r.id !== role.id && String(r.name || "").trim() === nextName);
     if (dup) return { error: "已存在同名角色" };
+    role.name = nextName;
     role.updatedAt = Date.now();
     state.store.roles[idx] = role;
     save();
@@ -90,6 +115,23 @@
     if (idx < 0) return false;
     state.store.roles.splice(idx, 1);
     if (state.currentRoleId === id) state.currentRoleId = null;
+    save();
+    return true;
+  }
+
+  /**
+   * 恢复被删除的角色（2026-10-29，配套详情页「删除 → 撤销」）。
+   * @param role 删除前的深拷贝快照（调用方负责 clone，避免撤销后被继续修改）
+   * @param index 原数组位置；越界/非法时追加到末尾
+   * @returns {boolean} false = id 已存在（不覆盖现有数据）/ 参数非法
+   */
+  function restoreRole(role, index) {
+    if (!role || !role.id) return false;
+    if (state.store.roles.some(r => r && r.id === role.id)) return false;
+    const i = (Number.isInteger(index) && index >= 0 && index <= state.store.roles.length)
+      ? index
+      : state.store.roles.length;
+    state.store.roles.splice(i, 0, role);
     save();
     return true;
   }
@@ -145,9 +187,9 @@
   }
 
   /**
-   * 删除「被完全取代」的藏品件（core.collectionIndex 的冗余件）。
+   * 删除「被完全取代」的藏品件（core.collectionIndex 的 redundant）。
+   * ⚠ 并列件（ties）不在此列——2026-10-29 起同值保留先入者，旧并列件留待用户显式清理。
    * @param keep 本次操作涉及的件（新入库 / 刚更新）——即使它暂时不占任何位也不删它
-   *             （用户主动收藏的件不该被系统悄悄丢掉）
    * @returns {Array} 被删除的件（供 UI 提示）
    */
   function pruneCollection(keep) {
@@ -163,23 +205,49 @@
     return dead;
   }
 
-  /** 加入藏品库（深拷贝 + 生成 id）→ 自动清理被完全取代的旧件 → 落盘 */
+  /**
+   * 判断某件是否是「某个位的唯一持有者」（collectionIndex 的 holders 里 arts[0] 为它）。
+   * 2026-10-29：一位一件后 arts 恒为长度 1；并列件不算持有者，也不入库。
+   */
+  function holdsAnyPosition(item, idx) {
+    let held = false;
+    idx.holders.forEach(h => { if (h.arts[0] === item) held = true; });
+    return held;
+  }
+
+  /** 加入藏品库（深拷贝 + 生成 id）→ 只有占位才入库 → 清理被完全取代的旧件 → 落盘 */
   function addCollectionItem(artifact) {
     const item = JSON.parse(JSON.stringify(artifact));
     if (!item.id) item.id = genId();
-    getCollection().push(item);
+    const list = getCollection();
+    list.push(item);
+    const core = global.App.core;
+    const idx = (core && typeof core.collectionIndex === "function") ? core.collectionIndex(list) : null;
+    if (idx && !holdsAnyPosition(item, idx)) {
+      // 一位一件（2026-10-29）：所有维度都没有严格超过现有藏品 → 不入藏。
+      // 并列件不替换先入者（reason=tie），完全更差的件也不留（reason=worse），避免「存了但看不见」。
+      state.store.collection = list.filter(a => a !== item);
+      return { ok: false, reason: idx.ties.includes(item) ? "tie" : "worse", item };
+    }
     const removed = pruneCollection(item);
     save();
     return { ok: true, item, removed };
   }
 
-  /** 更新藏品件（按 id 整体替换）→ 自动清理 → 落盘 */
+  /** 更新藏品件（按 id 整体替换）→ 更新后仍须占位 → 清理 → 落盘；不占位则回退旧件 */
   function updateCollectionItem(item) {
     const list = getCollection();
     const idx = list.findIndex(a => a.id === item.id);
-    if (idx < 0) return { ok: false };
+    if (idx < 0) return { ok: false, reason: "missing" };
+    const prev = list[idx];
     const next = JSON.parse(JSON.stringify(item));
     list[idx] = next;
+    const core = global.App.core;
+    const ci = (core && typeof core.collectionIndex === "function") ? core.collectionIndex(list) : null;
+    if (ci && !holdsAnyPosition(next, ci)) {
+      list[idx] = prev;   // 回退：编辑后不再占位的件不留在库里（否则同样是「隐形藏品」）
+      return { ok: false, reason: ci.ties.includes(next) ? "tie" : "worse" };
+    }
     const removed = pruneCollection(next);
     save();
     return { ok: true, item: next, removed };
@@ -193,6 +261,19 @@
     list.splice(idx, 1);
     save();
     return true;
+  }
+
+  /** 批量删除藏品（并列件一次性清理用）；返回实际删除数 */
+  function removeCollectionItems(ids) {
+    const set = new Set(Array.isArray(ids) ? ids : []);
+    if (!set.size) return 0;
+    const before = getCollection();
+    const next = before.filter(a => !set.has(a.id));
+    const n = before.length - next.length;
+    if (!n) return 0;
+    state.store.collection = next;
+    save();
+    return n;
   }
 
   /** 覆盖整个 store（导入用）；collection 必须透传 */
@@ -219,9 +300,9 @@
   global.App.store = {
     getStore, getRoles, getCustomSets, addCustomSet,
     getCurrentRole, setCurrentRole,
-    newRole, getRole, updateRole, deleteRole,
+    newRole, getRole, updateRole, deleteRole, restoreRole,
     replaceArtifact, replaceStore, upsertRole, genId, save,
     // 藏品库（2026-10-11）
-    getCollection, addCollectionItem, updateCollectionItem, removeCollectionItem, pruneCollection
+    getCollection, addCollectionItem, updateCollectionItem, removeCollectionItem, removeCollectionItems, pruneCollection
   };
 })(window);

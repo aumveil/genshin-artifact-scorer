@@ -23,7 +23,24 @@
   let closeTimer = null;
   let lastFocus = null;
   let active = null;        // { settle, done } 当前挂起的对话框（confirm/prompt/info）
+  let backdropClose = true; // 当前弹窗是否允许点遮罩关闭（openModal opts.backdrop=false 可关）
+  let modalSeq = 0;         // aria-labelledby 的唯一 id 序号
   const rootSel = "#modalRoot";
+  const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  /** 弹窗内可聚焦元素（不按可见性过滤：jsdom 下 offsetParent 恒为 null，过滤会让测试失真） */
+  function focusables(modal) {
+    return Array.from(modal.querySelectorAll(FOCUSABLE));
+  }
+
+  /** 打开后把焦点放进内容区第一个可聚焦元素；没有则落到关闭按钮 / 弹窗本身（2026-10-29） */
+  function focusFirstIn(modal) {
+    const body = modal.querySelector(".modal-body");
+    const target = (body && body.querySelector(FOCUSABLE)) || modal.querySelector(".modal-close") || modal;
+    if (target && target.focus) {
+      try { target.focus(); } catch (e) { /* 元素不可聚焦：忽略 */ }
+    }
+  }
 
   // ============ 模态框基础（增强版）============
   function openModal(titleHtml, bodyNode, footNode, opts) {
@@ -32,14 +49,22 @@
     if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
     root.innerHTML = "";
     root.classList.remove("hidden");
+    root.setAttribute("aria-hidden", "false");   // 打开时必须放开，否则读屏会把对话框当隐藏内容
+    backdropClose = opts.backdrop !== false;
 
     const modal = el("div", "modal");
+    // 无障碍语义（2026-10-29）：role=dialog + aria-modal + 标题关联；tabindex 供无控件弹窗落焦
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("tabindex", "-1");
     if (opts.size) modal.classList.add("modal-" + opts.size);
 
+    const titleId = "modal-title-" + (++modalSeq);
     const head = el("div", "modal-head",
-      `<h3>${titleHtml}</h3><button class="modal-close" title="关闭" aria-label="关闭"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>`);
+      `<h3 id="${titleId}">${titleHtml}</h3><button class="modal-close" title="关闭" aria-label="关闭"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-close"></use></svg></button>`);
     head.querySelector(".modal-close").addEventListener("click", () => closeModal());
     modal.appendChild(head);
+    modal.setAttribute("aria-labelledby", titleId);
 
     const body = el("div", "modal-body");
     body.appendChild(bodyNode);
@@ -55,15 +80,10 @@
     // 打开动画（下一帧添加类，触发 CSS transition）
     requestAnimationFrame(() => requestAnimationFrame(() => root.classList.add("modal-open")));
 
-    // 遮罩点击关闭（点击背景区域）
-    if (opts.backdrop !== false) {
-      root.addEventListener("click", e => { if (e.target === root) closeModal(); });
-    }
-
-    // 焦点管理：记录触发元素，将焦点移入弹窗
-    lastFocus = document.activeElement;
-    const first = modal.querySelector("input, select, textarea, button");
-    if (first && first.focus) setTimeout(() => first.focus(), 30);
+    // 焦点管理：记录触发元素；若焦点已在弹窗内（如体检 → 配置的连续打开），保留更早的触发点
+    const act = document.activeElement;
+    if (!act || !root.contains(act)) lastFocus = act;
+    setTimeout(() => focusFirstIn(modal), 30);
 
     // 滚动锁定
     document.body.style.overflow = "hidden";
@@ -88,10 +108,34 @@
       if (!root.classList.contains("modal-open")) {
         root.innerHTML = "";
         root.classList.add("hidden");
+        root.setAttribute("aria-hidden", "true");   // 关闭后恢复隐藏语义，避免读屏读到空容器
       }
       if (lastFocus && lastFocus.focus) { try { lastFocus.focus(); } catch (e) { /* 元素可能已销毁 */ } }
     }, 160);
   }
+
+  // 遮罩点击关闭：只注册一次（2026-10-29 修：原实现每次 openModal 都 addEventListener，监听器随弹窗次数累加）
+  document.addEventListener("click", e => {
+    const root = $(rootSel);
+    if (!root || root.classList.contains("hidden") || !backdropClose) return;
+    if (e.target === root) closeModal();
+  });
+
+  // Tab 焦点陷阱：只注册一次；首尾循环，焦点若逃出弹窗则拉回第一个（2026-10-29）
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Tab") return;
+    const root = $(rootSel);
+    if (!root || root.classList.contains("hidden")) return;
+    const modal = root.querySelector(".modal");
+    if (!modal) return;
+    const list = focusables(modal);
+    if (!list.length) { e.preventDefault(); modal.focus(); return; }
+    const first = list[0], last = list[list.length - 1];
+    const act = document.activeElement;
+    if (!modal.contains(act)) { e.preventDefault(); first.focus(); return; }
+    if (e.shiftKey && act === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && act === last) { e.preventDefault(); first.focus(); }
+  });
 
   // Esc 关闭任意弹窗
   document.addEventListener("keydown", e => {

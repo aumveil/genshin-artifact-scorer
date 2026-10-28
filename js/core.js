@@ -751,13 +751,16 @@
   }
 
   /**
-   * 藏品索引：位（桶 × 维度）→ 持有者（该位值最大者，并列全部计为持有者）；
-   * 并派生「冗余件」= 不占任何位的件（被完全取代）→ 由 store 层删除。
+   * 藏品索引（2026-10-29 改口径：一位一件）：
+   *   位（桶 × 维度）→ **唯一**持有者 = 该位值最大者；**同值保留先入库的那件**（不再追加并列）。
+   * 派生两类「未占位件」：
+   *   · ties      至少一个维度与当前持有者同值（并列 / 重复录入）→ 不自动删，由用户确认清理
+   *   · redundant 所有维度都严格更差（被完全取代）→ 由 store 层删除
    * 浮点比较统一 ×100 整数化（否则 0.1+0.2 类尾差会把「并列」误判为不等）。
    */
   function collectionIndex(collection) {
     const list = Array.isArray(collection) ? collection : [];
-    const holders = new Map();                 // posKey → { bucketKey, bucket, dimKey, value, ivalue, arts }
+    const holders = new Map();                 // posKey → { bucketKey, bucket, dimKey, value, ivalue, arts:[唯一持有者] }
     list.forEach(art => {
       const bucket = collectionBucketOf(art);
       if (!bucket) return;
@@ -767,14 +770,35 @@
         const posKey = bucket.key + "|" + dimKey;
         const iv = Math.round(v * 100);
         let h = holders.get(posKey);
-        if (!h) { h = { posKey, bucketKey: bucket.key, bucket, dimKey, value: v, ivalue: iv, arts: [] }; holders.set(posKey, h); }
+        if (!h) {
+          h = { posKey, bucketKey: bucket.key, bucket, dimKey, value: v, ivalue: iv, arts: [art] };
+          holders.set(posKey, h);
+          return;
+        }
         if (iv > h.ivalue) { h.value = v; h.ivalue = iv; h.arts = [art]; }
-        else if (iv === h.ivalue) h.arts.push(art);
+        // iv === h.ivalue → 保留先入者，不追加（一位一件）
       });
     });
+
     const holding = new Set();
     holders.forEach(h => h.arts.forEach(a => holding.add(a)));
-    return { holders, redundant: list.filter(a => !holding.has(a)) };
+    /** 该件是否在某个维度与现有持有者同值（用于区分「并列」与「完全更差」） */
+    const hasTie = art => {
+      const bucket = collectionBucketOf(art);
+      if (!bucket) return false;
+      return C.collectionBucketDims(bucket).some(dimKey => {
+        const v = dimValue(art, dimKey);
+        if (!(v > 0)) return false;
+        const h = holders.get(bucket.key + "|" + dimKey);
+        return !!h && Math.round(v * 100) === h.ivalue;
+      });
+    };
+    const ties = [], redundant = [];
+    list.forEach(a => {
+      if (holding.has(a)) return;
+      (hasTie(a) ? ties : redundant).push(a);
+    });
+    return { holders, ties, redundant };
   }
 
   /**
@@ -831,6 +855,71 @@
     return { inScope: true, bucket, rows };
   }
 
+  // ============ 角色配置体检（只读，2026-10-29，§8.43）============
+  /**
+   * 扫描「会让评分不可信」的角色配置问题，供 UI 只读展示。
+   * **纯读**：不修改 role / store；修复仍走既有角色配置弹窗。
+   * 口径：
+   *   · empty-eff     有效属性为空 → 评分恒 0（配置弹窗也不允许保存这种状态）
+   *   · flat-weight   有效词条 ≥2 且权值全部相同 → 评分退化为不加权求和
+   *   · missing-slots 5 部位未录全 → 套装类判定把该角色当作不存在
+   *   · er-placeholder 看充能但需求/面板都还是 180 → 达标与超额判定可能不准
+   *   · weight-residue weights 里有非有效词条且 >0 → 不参与评分，但会让配置看着更完整
+   * 空有效属性只报一条（其余项此时无意义），避免同一角色刷屏。
+   * @returns {{total:number, affected:number, groups:Array<{key,label,severity,desc,roles:Array<{id,name,detail}>}>}}
+   */
+  function auditRoles(roles) {
+    const list = Array.isArray(roles) ? roles : [];
+    const fmtW = v => String(Math.round(Number(v) * 100) / 100);
+    const groups = [
+      { key: "empty-eff", label: "有效属性为空", severity: "danger", desc: "没有有效词条 → 角色评分恒为 0；配置弹窗也不允许保存这种状态。", roles: [] },
+      { key: "flat-weight", label: "权值全部相同", severity: "warn", desc: "多条有效词条的权值完全一样 → 评分退化为不加权求和，主次不分。", roles: [] },
+      { key: "missing-slots", label: "5 部位未录全", severity: "warn", desc: "套装类判定会把该角色当作不存在（情况二/三与重塑宿主均不命中）。", roles: [] },
+      { key: "er-placeholder", label: "充能疑似占位 180/180", severity: "warn", desc: "看充能，但需求与面板都还是默认值 → 达标/超额判定可能不准。", roles: [] },
+      { key: "weight-residue", label: "权值含非有效词条", severity: "info", desc: "残留键不参与评分，但会让配置看起来比实际更完整。", roles: [] }
+    ];
+    const byKey = new Map(groups.map(g => [g.key, g]));
+
+    list.forEach(role => {
+      if (!role) return;
+      const eff = Array.isArray(role.effectiveStats) ? role.effectiveStats : [];
+      const w = role.weights || {};
+      if (!eff.length) {
+        byKey.get("empty-eff").roles.push({ id: role.id, name: role.name, detail: "0 个有效词条" });
+        return;
+      }
+      const vals = eff.map(s => (Number.isFinite(Number(w[s])) ? Number(w[s]) : null));
+      if (eff.length >= 2 && vals.every(v => v != null && v === vals[0])) {
+        byKey.get("flat-weight").roles.push({ id: role.id, name: role.name, detail: `${eff.length} 条均为 ${fmtW(vals[0])}` });
+      }
+      const residue = Object.keys(w).filter(k => !eff.includes(k) && Number(w[k]) > 0);
+      if (residue.length) {
+        byKey.get("weight-residue").roles.push({
+          id: role.id, name: role.name,
+          detail: residue.map(k => `${C.MAIN_SHORT[k] || k}=${fmtW(w[k])}`).join("、")
+        });
+      }
+      const missing = C.SLOT_KEYS.filter(k => {
+        const a = role.artifacts && role.artifacts[k];
+        return !a || !a.mainStat;
+      });
+      if (missing.length) {
+        byKey.get("missing-slots").roles.push({
+          id: role.id, name: role.name,
+          detail: `缺 ${missing.map(k => C.SLOTS[k].name).join("、")}`
+        });
+      }
+      if (eff.includes("元素充能效率") && Number(role.erRequirement) === 180 && Number(role.currentER) === 180) {
+        byKey.get("er-placeholder").roles.push({ id: role.id, name: role.name, detail: "需求 180 / 面板 180" });
+      }
+    });
+
+    const shown = groups.filter(g => g.roles.length);
+    const affected = new Set();
+    shown.forEach(g => g.roles.forEach(r => affected.add(r.id)));
+    return { total: list.filter(Boolean).length, affected: affected.size, groups: shown };
+  }
+
   global.App.core = {
     calcArtifactScore, calcPerfect, calcEnergyPenalty, calcCharacterScore, scoreComposition,
     erApplies,   // 充能是否适用（有效词条含「元素充能效率」）——UI 与算法共用同一判定（2026-10-17）
@@ -839,6 +928,7 @@
     // 角色套装字段（2026-10-09）
     isFullyRecorded, roleSets, hasSetInfo, isSetPiece, deriveSetsFromArtifacts, sameSetComposition, checkSetConsistency,
     checkLooseSlot,   // 散件位 vs 实况一致性（2026-10-20，方案 A 只读检测）
+    auditRoles,       // 角色配置体检（2026-10-29，纯读）
     // 藏品（2026-10-11）
     statValue, dimValue, dimFull, collectionBucketOf, collectionIndex, analyzeCollection
   };
