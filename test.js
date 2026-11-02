@@ -951,6 +951,32 @@ console.log("== 文本识别：多行字段格式（用户样例）==");
   assert(rl.result.level === 12, "无星级：独立 Lv.12 → 等级 12", JSON.stringify(rl.result));
 }
 
+console.log("== 文本识别：千位分隔符主属性数值（2026-11-03 用户样例）==");
+{
+  // 用户样例：「4,780」曾被 SEPARATOR_RE 的逗号切成「4」+「780」——4 被当主属性数值吃掉，780 落入副词条段
+  const text = "生之花\n生命值\n4,780\n+20\n暴击伤害+20.2%·攻击力+33暴击率+3.1%·元素精通+44\n黄金剧团：(0)";
+  const res = parser.parseArtifactText(text);
+  assert(res.result.slot === "flower", "千分位：部位 = 生之花", res.result.slot);
+  assert(res.result.mainStat === "生命值", "千分位：主属性 = 生命值", res.result.mainStat);
+  assert(res.result.level === 20, "千分位：等级 = 20", res.result.level);
+  assert(res.result.set === "黄金剧团", "千分位：套装 = 黄金剧团", res.result.set);
+  const subs = res.result.substats.map(s => `${s.stat}:${s.value}`);
+  assert(JSON.stringify(subs) === JSON.stringify(["暴击伤害:20.2", "攻击力:33", "暴击率:3.1", "元素精通:44"]),
+    "千分位：副词条 4 条内容正确", JSON.stringify(subs));
+  assert(!res.warnings.some(w => w.includes("无法识别副词条片段")), "千分位：无「无法识别副词条片段」", JSON.stringify(res.warnings));
+  assert(res.ok, "千分位：零警告 ok=true", JSON.stringify(res.warnings));
+
+  // 全角逗号千分位（4，780）同样处理
+  const rFull = parser.parseArtifactText("生之花\n生命值\n4，780\n+20\n暴击伤害+20.2%·攻击力+33·暴击率+3.1%·元素精通+44 黄金剧团");
+  assert(rFull.result.mainStat === "生命值" && rFull.result.substats.length === 4 && rFull.ok,
+    "全角千分位：4，780 → 正常识别", JSON.stringify({ m: rFull.result.mainStat, n: rFull.result.substats.length, w: rFull.warnings }));
+
+  // 护栏：逗号仍可作副词条分隔符，不得被千分位规则吞掉
+  const rSep = parser.parseArtifactText("生之花\n生命值\n4,780\n+20\n暴击伤害+20.2%,攻击力+33, 暴击率+3.1%,元素精通+44 黄金剧团");
+  assert(rSep.result.substats.length === 4 && rSep.ok, "逗号分隔副词条：仍识别 4 条（千分位规则不误伤）",
+    JSON.stringify({ n: rSep.result.substats.length, w: rSep.warnings }));
+}
+
 console.log("== 词条消歧（% 判定）==");
 {
   const r1 = parser.parseStatSegment("攻击力+4.1%");
