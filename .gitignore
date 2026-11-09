@@ -4,6 +4,11 @@
 # 依赖与日志
 node_modules/
 *.log
+__pycache__/
+
+# OCR 工具的运行时产物与本机配置（代码本身要入库，这些不要）
+tools/ocr/debug/
+tools/ocr/service_config.json
 
 # 系统文件
 .DS_Store

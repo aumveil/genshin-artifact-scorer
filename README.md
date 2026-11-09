@@ -82,11 +82,16 @@ js/
   feedback.js              弹窗 / 通知等反馈组件
   main.js                  入口
 assets/elements/           元素图标（深色原样；light/ = 浅色变体）
+tools/ocr/                 【可选】截图识别工具，需 Python 环境，见 tools/ocr/README.md
 test.js                    算法回归测试
 test-dom.js                jsdom 页面冒烟测试
 docs/                      设计与开发文档（背景知识 / 算法设计 / 实现方案）
 backups/                   网页导出的数据 JSON 备份（随仓库版本化保存）
 ```
+
+> **网页本身仍是纯前端、零安装**：`file://` 直接打开 `index.html` 即可用。
+> `tools/ocr/` 只是可选附属工具——在游戏里按 `Alt+S` 自动截图识别，省去手打词条；
+> 该服务没启动时，网页行为与以前完全一致。详见 [tools/ocr/README.md](tools/ocr/README.md)。
 
 ## 设计文档
 

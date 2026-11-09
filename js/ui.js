@@ -2841,6 +2841,81 @@
     });
   }
 
+  /**
+   * 接收 OCR 识别结果（由 js/ocr-bridge.js 调用）
+   *
+   * 语义：识别到的是一件**独立**圣遗物，与任何角色无关，对应功能是「价值评估」。
+   * **直接跳到评估结果，不弹窗**——用户要的是「这件值不值得留」，不是先填一遍表单。
+   *
+   * 走的路径与录入弹窗「保存并评估」完全一致（pendingArtifact → evaluate 视图 → render），
+   * 所以评估口径、排序、图例都不会有分叉。
+   *
+   * 只有识别不完整（缺部位 / 硬校验不通过）时才回退到录入弹窗，让用户对着原文修正。
+   *
+   * @param {{text:string, suspicious?:Array, seq?:number}} payload
+   * @returns {boolean} 是否直接进入了评估
+   */
+  function receiveOcrArtifact(payload) {
+    if (!payload || !payload.text) {
+      feedback.toast("识别结果为空，请重试", "error");
+      return false;
+    }
+    const roles = store.getRoles();
+    if (!roles || !roles.length) {
+      feedback.toast("还没有角色数据，请先新建一个角色", "warn");
+      return false;
+    }
+
+    const parsed = global.App.parser.parseArtifactText(payload.text, { customSets: store.getCustomSets() });
+    const r = parsed.result || {};
+
+    // 按 collectArtifact 的同一口径重建，保证与手动录入的对象完全同构
+    const art = r.slot ? {
+      id: store.genId(),
+      slot: r.slot,
+      set: r.set,
+      mainStat: r.mainStat,
+      level: r.level,
+      substats: (r.substats || [])
+        .filter(s => s.stat && s.value > 0)
+        .map(s => ({ stat: s.stat, value: Number(s.value), activated: s.activated }))
+    } : null;
+
+    const hard = art
+      ? (data.validateArtifact(art) || []).filter(e => e.level === "hard")
+      : [];
+
+    // parser 的警告：只有「3 条激活副词条」属正常形态提示（3 初始件就是这样），
+    // 其余（缺部位/缺套装/缺主属性/片段无法识别/词条重复/数量异常）都意味着数据不完整，
+    // 直接评估会算出误导性结论 —— 一律回退到弹窗，把原文摆给用户改。
+    const HINT_ONLY = /3 条激活副词条/;
+    const blocking = (parsed.warnings || []).filter(w => !HINT_ONLY.test(w));
+
+    if (!art || hard.length || blocking.length) {
+      const why = blocking[0] || (hard[0] && hard[0].msg) || "识别结果不完整";
+      feedback.toast(`识别结果需核对（${why}），已打开录入窗口`, "warn", 5000);
+      startAssessFlow(payload.text, true);
+      return false;
+    }
+
+    // —— 直接进评估，不弹窗 ——
+    pendingArtifact = art;
+    evalHidden.clear();
+    view = { type: "evaluate", evalRoleId: store.getCurrentRole() ? store.getCurrentRole().id : null };
+    render();
+
+    // 服务端的两类可疑信号：多尺度不一致（1x/2x 读数不同）、带「+」却无数字的残行。
+    // 它们不影响能否评估，但提示用户去核对更稳妥。
+    const sus = payload.suspicious || [];
+    if (sus.length) {
+      feedback.toast(`注意：有 ${sus.length} 处数值可疑（${sus[0].reason}），请核对`, "warn", 6000);
+    }
+    if (r.setUnknown && r.set) {
+      feedback.toast(`套装「${r.set}」不在套装库中，评估按该名称直接处理`, "info", 4200);
+    }
+    return true;
+  }
+
   global.App = global.App || {};
-  global.App.ui = { render, setupIO, openRoleConfigModal, openArtifactModal, openEvaluateModal, renderCollectionView, buildCollectionPanel };
+  global.App.ui = { render, setupIO, openRoleConfigModal, openArtifactModal, openEvaluateModal, renderCollectionView, buildCollectionPanel, receiveOcrArtifact };
 })(window);
